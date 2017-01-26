@@ -17,16 +17,10 @@
 #include <d3dcompiler.h>
 #include <vector>
 #include <string>
+#include <memory>
 
-HRESULT CreateLibrary(IDxcLibrary **pLibrary) {
-  return DxcCreateInstance(CLSID_DxcLibrary, __uuidof(IDxcLibrary),
-                           (void **)pLibrary);
-}
-
-HRESULT CreateCompiler(IDxcCompiler **ppCompiler) {
-  return DxcCreateInstance(CLSID_DxcCompiler, __uuidof(IDxcCompiler),
-                           (void **)ppCompiler);
-}
+thread_local std::unique_ptr<IDxcCompiler> g_tlsCompiler;
+thread_local std::unique_ptr<IDxcLibrary>  g_tlsLibrary;
 
 HRESULT CreateContainerReflection(IDxcContainerReflection **ppReflection) {
   return DxcCreateInstance(CLSID_DxcContainerReflection,
@@ -39,7 +33,6 @@ HRESULT CompileFromBlob(IDxcBlobEncoding *pSource, LPCWSTR pSourceName,
                         LPCSTR pEntrypoint, LPCSTR pTarget, UINT Flags1,
                         UINT Flags2, ID3DBlob **ppCode,
                         ID3DBlob **ppErrorMsgs) {
-  CComPtr<IDxcCompiler> compiler;
   CComPtr<IDxcOperationResult> operationResult;
   HRESULT hr;
 
@@ -102,8 +95,7 @@ HRESULT CompileFromBlob(IDxcBlobEncoding *pSource, LPCWSTR pSourceName,
     //if(Flags1 & D3DCOMPILE_PARTIAL_PRECISION) arguments.push_back(L"/Gpp");
     if(Flags1 & D3DCOMPILE_RESOURCES_MAY_ALIAS) arguments.push_back(L"/res_may_alias");
 
-    IFR(CreateCompiler(&compiler));
-    IFR(compiler->Compile(pSource, pSourceName, pEntrypointW, pTargetProfileW,
+    IFR(g_tlsCompiler->Compile(pSource, pSourceName, pEntrypointW, pTargetProfileW,
                           arguments.data(), (UINT)arguments.size(),
                           defines.data(), (UINT)defines.size(), nullptr,
                           &operationResult));
@@ -129,15 +121,13 @@ HRESULT WINAPI BridgeD3DCompile(LPCVOID pSrcData, SIZE_T SrcDataSize,
                                 ID3DInclude *pInclude, LPCSTR pEntrypoint,
                                 LPCSTR pTarget, UINT Flags1, UINT Flags2,
                                 ID3DBlob **ppCode, ID3DBlob **ppErrorMsgs) {
-  CComPtr<IDxcLibrary> library;
   CComPtr<IDxcBlobEncoding> source;
 
   *ppCode = nullptr;
   if (ppErrorMsgs != nullptr)
     *ppErrorMsgs = nullptr;
 
-  IFR(CreateLibrary(&library));
-  IFR(library->CreateBlobWithEncodingFromPinned((LPBYTE)pSrcData, SrcDataSize,
+  IFR(g_tlsLibrary->CreateBlobWithEncodingFromPinned((LPBYTE)pSrcData, SrcDataSize,
                                                 CP_ACP, &source));
 
   try {
@@ -169,7 +159,6 @@ HRESULT WINAPI BridgeD3DCompileFromFile(
     LPCWSTR pFileName, const D3D_SHADER_MACRO *pDefines, ID3DInclude *pInclude,
     LPCSTR pEntrypoint, LPCSTR pTarget, UINT Flags1, UINT Flags2,
     ID3DBlob **ppCode, ID3DBlob **ppErrorMsgs) {
-  CComPtr<IDxcLibrary> library;
   CComPtr<IDxcBlobEncoding> source;
   HRESULT hr;
 
@@ -177,10 +166,7 @@ HRESULT WINAPI BridgeD3DCompileFromFile(
   if (ppErrorMsgs != nullptr)
     *ppErrorMsgs = nullptr;
 
-  hr = CreateLibrary(&library);
-  if (FAILED(hr))
-    return hr;
-  hr = library->CreateBlobFromFile(pFileName, nullptr, &source);
+  hr = g_tlsLibrary->CreateBlobFromFile(pFileName, nullptr, &source);
   if (FAILED(hr))
     return hr;
 
@@ -194,8 +180,6 @@ HRESULT WINAPI BridgeD3DDisassemble(
   _In_ UINT Flags,
   _In_opt_ LPCSTR szComments,
   _Out_ ID3DBlob** ppDisassembly) {
-  CComPtr<IDxcLibrary> library;
-  CComPtr<IDxcCompiler> compiler;
   CComPtr<IDxcBlobEncoding> source;
   CComPtr<IDxcBlobEncoding> disassemblyText;
 
@@ -204,11 +188,10 @@ HRESULT WINAPI BridgeD3DDisassemble(
   UNREFERENCED_PARAMETER(szComments);
   UNREFERENCED_PARAMETER(Flags);
 
-  IFR(CreateLibrary(&library));
-  IFR(library->CreateBlobWithEncodingFromPinned((LPBYTE)pSrcData, SrcDataSize,
+  IFR(g_tlsLibrary->CreateBlobWithEncodingFromPinned((LPBYTE)pSrcData, SrcDataSize,
                                                 CP_ACP, &source));
-  IFR(CreateCompiler(&compiler));
-  IFR(compiler->Disassemble(source, &disassemblyText));
+
+  IFR(g_tlsCompiler->Disassemble(source, &disassemblyText));
   IFR(disassemblyText.QueryInterface(ppDisassembly));
 
   return S_OK;
@@ -219,15 +202,13 @@ HRESULT WINAPI BridgeD3DReflect(
   _In_ SIZE_T SrcDataSize,
   _In_ REFIID pInterface,
   _Out_ void** ppReflector) {
-  CComPtr<IDxcLibrary> library;
   CComPtr<IDxcBlobEncoding> source;
   CComPtr<IDxcContainerReflection> reflection;
   UINT shaderIdx;
 
   *ppReflector = nullptr;
 
-  IFR(CreateLibrary(&library));
-  IFR(library->CreateBlobWithEncodingOnHeapCopy((LPBYTE)pSrcData, SrcDataSize,
+  IFR(g_tlsLibrary->CreateBlobWithEncodingOnHeapCopy((LPBYTE)pSrcData, SrcDataSize,
                                                 CP_ACP, &source));
   IFR(CreateContainerReflection(&reflection));
   IFR(reflection->Load(source));
@@ -237,10 +218,30 @@ HRESULT WINAPI BridgeD3DReflect(
   return S_OK;
 }
 
+
+HRESULT CreateLibrary(IDxcLibrary **pLibrary) {
+    return DxcCreateInstance(CLSID_DxcLibrary, __uuidof(IDxcLibrary),
+        (void **)pLibrary);
+}
+
+HRESULT CreateCompiler(IDxcCompiler **ppCompiler) {
+    return DxcCreateInstance(CLSID_DxcCompiler, __uuidof(IDxcCompiler),
+        (void **)ppCompiler);
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD Reason, LPVOID) {
   BOOL result = TRUE;
   if (Reason == DLL_PROCESS_ATTACH) {
     DisableThreadLibraryCalls(hinstDLL);
+    IDxcCompiler *tmpCompiler;
+    IFR(CreateCompiler(&tmpCompiler));
+    g_tlsCompiler.reset(tmpCompiler);
+
+    IDxcLibrary *tmpLibrary;
+    IFR(CreateLibrary(&tmpLibrary));
+    g_tlsLibrary.reset(tmpLibrary);
+
+
   } else if (Reason == DLL_PROCESS_DETACH) {
     // Nothing to clean-up.
   }
