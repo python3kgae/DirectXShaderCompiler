@@ -338,6 +338,7 @@ struct ValidationContext {
   Module &M;
   Module *pDebugModule;
   DxilModule &DxilMod;
+  Type   *HandleTy;
   const DataLayout &DL;
   DiagnosticPrinterRawOStream &DiagPrinter;
   PSExecutionInfo PSExec;
@@ -368,6 +369,7 @@ struct ValidationContext {
         kLLVMLoopMDKind(llvmModule.getContext().getMDKindID("llvm.loop")),
         DiagPrinter(DiagPrn), LastRuleEmit((ValidationRule)-1),
         m_bCoverageIn(false), m_bInnerCoverageIn(false) {
+    HandleTy = dxilModule.GetOP()->GetHandleType();
     for (unsigned i = 0; i < DXIL::kNumOutputStreams; i++) {
       hasOutputPosition[i] = false;
       OutputPositionMask[i] = 0;
@@ -701,6 +703,56 @@ static DXIL::SamplerKind GetSamplerKind(Value *samplerHandle, ValidationContext 
   return sampler->GetSamplerKind();
 }
 
+static DXIL::ResourceKind
+GetResourceKindAndCompTy(Value *handle, DXIL::ComponentType &CompTy,
+                         DXIL::ResourceClass &ResClass,
+                         ValidationContext &ValCtx) {
+  DxilTypeSystem &typeSys = ValCtx.DxilMod.GetTypeSystem();
+  MDNode *MD = nullptr;
+  if (Argument *Arg = dyn_cast<Argument>(handle)) {
+    Function *F = Arg->getParent();
+    if (DxilFunctionAnnotation *FuncAnnot = typeSys.GetFunctionAnnotation(F)) {
+      DxilParameterAnnotation &ParamAnnot =
+          FuncAnnot->GetParameterAnnotation(Arg->getArgNo());
+      MD = ParamAnnot.GetResourceAttribute();
+    }
+  } else if (LoadInst *LI = dyn_cast<LoadInst>(handle)) {
+    handle = LI->getPointerOperand();
+    for (User *U : handle->users()) {
+      if (CallInst *CI = dyn_cast<CallInst>(U)) {
+        Function *F = CI->getCalledFunction();
+        unsigned ArgNo = 0;
+        for (unsigned i = 0; i < CI->getNumArgOperands(); i++) {
+          if (CI->getArgOperand(i) == handle) {
+            ArgNo = i;
+            break;
+          }
+        }
+        if (DxilFunctionAnnotation *FuncAnnot =
+                typeSys.GetFunctionAnnotation(F)) {
+          DxilParameterAnnotation &ParamAnnot =
+              FuncAnnot->GetParameterAnnotation(ArgNo);
+          MD = ParamAnnot.GetResourceAttribute();
+          break;
+        }
+      }
+    }
+  }
+
+  if (!MD)
+    return DXIL::ResourceKind::Invalid;
+
+  DxilResourceBase R = ValCtx.DxilMod.LoadDxilResourceBaseFromMDNode(MD);
+  ResClass = R.GetClass();
+  if (ResClass == DXIL::ResourceClass::SRV ||
+      ResClass == DXIL::ResourceClass::UAV) {
+    DxilResource R;
+    ValCtx.DxilMod.LoadDxilResourceFromMDNode(MD, R);
+    CompTy = R.GetCompType().GetKind();
+  }
+  return R.GetKind();
+}
+
 static DXIL::ResourceKind GetResourceKindAndCompTy(Value *handle, DXIL::ComponentType &CompTy, DXIL::ResourceClass &ResClass,
     unsigned &resIndex,
     ValidationContext &ValCtx) {
@@ -708,6 +760,12 @@ static DXIL::ResourceKind GetResourceKindAndCompTy(Value *handle, DXIL::Componen
   ResClass = DXIL::ResourceClass::Invalid;
 
   if (!isa<CallInst>(handle)) {
+    DXIL::ResourceKind Kind = GetResourceKindAndCompTy(handle, CompTy, ResClass, ValCtx);
+    if (Kind != DXIL::ResourceKind::Invalid) {
+      // No index for handle from parameter.
+      resIndex = -1;
+      return Kind;
+    }
     ValCtx.EmitError(ValidationRule::InstrHandleNotFromCreateHandle);
     return DXIL::ResourceKind::Invalid;
   }
@@ -1996,6 +2054,9 @@ static bool ValidateType(Type *Ty, ValidationContext &ValCtx) {
   }
   if (Ty->isStructTy()) {
     bool result = true;
+    // Allow alloca handle for out resource parameter.
+    if (Ty == ValCtx.HandleTy)
+      return true;
     StructType *ST = cast<StructType>(Ty);
 
     StringRef Name = ST->getName();
@@ -2540,7 +2601,8 @@ static void ValidateFunction(Function &F, ValidationContext &ValCtx) {
   if (F.isDeclaration()) {
     ValidateExternalFunction(&F, ValCtx);
   } else {
-    if (!F.arg_empty())
+    if (!F.arg_empty() && (&F == ValCtx.DxilMod.GetEntryFunction() ||
+                           &F == ValCtx.DxilMod.GetPatchConstantFunction()))
       ValCtx.EmitFormatError(ValidationRule::FlowFunctionCall,
                              {F.getName().str()});
 
@@ -2565,7 +2627,7 @@ static void ValidateFunction(Function &F, ValidationContext &ValCtx) {
           funcAnnotation->GetParameterAnnotation(arg.getArgNo());
 
       if (argTy->isStructTy() && !HLModule::IsStreamOutputType(argTy) &&
-          !paramAnnoation.HasMatrixAnnotation()) {
+          argTy != ValCtx.HandleTy && !paramAnnoation.HasMatrixAnnotation()) {
         if (arg.hasName())
           ValCtx.EmitFormatError(
               ValidationRule::DeclFnFlattenParam,
