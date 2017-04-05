@@ -149,7 +149,20 @@ private:
     HandleMetaMap[Handle] = {DXIL::ResourceClass::Invalid,
                              DXIL::ResourceKind::Invalid,
                              StructType::get(Type::getVoidTy(HLM.GetCtx()))};
+    if (Argument *Arg = dyn_cast<Argument>(Handle)) {
+      MDNode *MD = HLM.GetDxilResourceAttrib(Arg);
+      if (!MD) {
+        Handle->getContext().emitError("cannot map resource to handle");
+        return HandleMetaMap[Handle];
+      }
+      DxilResourceBase Res = HLM.LoadDxilResourceBaseFromMDNode(MD);
 
+      ResAttribute Attrib = {Res.GetClass(), Res.GetKind(),
+                             Res.GetGlobalSymbol()->getType()};
+
+      HandleMetaMap[Handle] = Attrib;
+      return HandleMetaMap[Handle];
+    }
     if (CallInst *CI = dyn_cast<CallInst>(Handle)) {
       MDNode *MD = HLM.GetDxilResourceAttrib(CI->getCalledFunction());
       if (!MD) {
@@ -5989,11 +6002,10 @@ void TranslateDefaultSubscript(CallInst *CI, HLOperationLowerHelper &helper,  HL
   auto U = CI->user_begin();
 
   Value *ptr = CI->getArgOperand(HLOperandIndex::kSubscriptObjectOpIdx);
-  Instruction *ptrInst = dyn_cast<Instruction>(ptr);
 
   hlsl::OP *hlslOP = &helper.hlslOP;
   // Resource ptr.
-  Value *handle = ptrInst;
+  Value *handle = ptr;
   DXIL::ResourceClass RC = pObjHelper->GetRC(handle);
   DXIL::ResourceKind RK = pObjHelper->GetRK(handle);
 
@@ -6244,11 +6256,11 @@ void TranslateHLSubscript(CallInst *CI, HLSubscriptOpcode opcode,
     ldInst->eraseFromParent();
     Translated = true;
     return;
-  } else if (Instruction *ptrInst = dyn_cast<Instruction>(ptr)) {
+  } else {
     Type *HandleTy = hlslOP->GetHandleType();
-    if (ptrInst->getType() == HandleTy) {
+    if (ptr->getType() == HandleTy) {
       // Resource ptr.
-      Value *handle = ptrInst;
+      Value *handle = ptr;
       DXIL::ResourceKind RK = pObjHelper->GetRK(handle);
       if (RK == DxilResource::Kind::Invalid) {
         Translated = false;

@@ -84,7 +84,10 @@ public:
   unsigned AddUAV(std::unique_ptr<DxilResource> pUAV);
   DxilResource &GetUAV(unsigned idx);
   const DxilResource &GetUAV(unsigned idx) const;
-  const std::vector<std::unique_ptr<DxilResource> > &GetUAVs() const;
+  const std::vector<std::unique_ptr<DxilResource>> &GetUAVs() const;
+
+  DxilResourceBase LoadDxilResourceBaseFromMDNode(llvm::MDNode *MD);
+  void LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R);
 
   void RemoveUnusedResources();
   void RemoveFunction(llvm::Function *F);

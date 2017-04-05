@@ -695,6 +695,13 @@ const vector<unique_ptr<DxilResource> > &DxilModule::GetUAVs() const {
   return m_UAVs;
 }
 
+DxilResourceBase DxilModule::LoadDxilResourceBaseFromMDNode(MDNode *MD) {
+  return m_pMDHelper->LoadDxilResourceBaseFromMDNode(MD);
+}
+void DxilModule::LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R) {
+  return m_pMDHelper->LoadDxilResourceFromMDNode(MD, R);
+}
+
 template <typename TResource>
 static void RemoveResources(std::vector<std::unique_ptr<TResource>> &vec,
                     std::unordered_set<unsigned> &immResID) {

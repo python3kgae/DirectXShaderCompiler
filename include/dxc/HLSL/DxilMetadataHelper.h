@@ -290,6 +290,8 @@ public:
   void LoadDxilCBuffer(const llvm::MDOperand &MDO, DxilCBuffer &CB);
   llvm::MDTuple *EmitDxilSampler(const DxilSampler &S);
   void LoadDxilSampler(const llvm::MDOperand &MDO, DxilSampler &S);
+  DxilResourceBase  LoadDxilResourceBaseFromMDNode(llvm::MDNode *MD);
+  void LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R);
 
   // Type system.
   void EmitDxilTypeSystem(DxilTypeSystem &TypeSystem, std::vector<llvm::GlobalVariable *> &LLVMUsed);
