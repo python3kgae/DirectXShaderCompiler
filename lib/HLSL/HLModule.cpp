@@ -1052,7 +1052,8 @@ void HLModule::MergeGepUse(Value *V) {
     }
   }
   if (V->user_empty()) {
-    if (Instruction *I = dyn_cast<Instruction>(V))
+    // Only remove GEP here, root ptr will be removed by DCE.
+    if (GetElementPtrInst *I = dyn_cast<GetElementPtrInst>(V))
       I->eraseFromParent();
   }
 }

@@ -286,6 +286,7 @@ public:
   TEST_METHOD(CompileWhenIncludeSystemMissingThenLoadAttempt)
   TEST_METHOD(CompileWhenIncludeFlagsThenIncludeUsed)
   TEST_METHOD(CompileWhenIncludeMissingThenFail)
+  TEST_METHOD(CompileWhenIncludeHasPathThenOK)
 
   TEST_METHOD(CompileWhenODumpThenPassConfig)
   TEST_METHOD(CompileWhenODumpThenOptimizerMatch)
@@ -358,6 +359,7 @@ public:
   TEST_METHOD(CodeGenFirstbitLo)
   TEST_METHOD(CodeGenFloatMaxtessfactor)
   TEST_METHOD(CodeGenFModPS)
+  TEST_METHOD(CodeGenFuncCast)
   TEST_METHOD(CodeGenFunctionalCast)
   TEST_METHOD(CodeGenGather)
   TEST_METHOD(CodeGenGatherCmp)
@@ -561,6 +563,7 @@ public:
   TEST_METHOD(CodeGenUintSample)
   TEST_METHOD(CodeGenUmaxObjectAtomic)
   TEST_METHOD(CodeGenUnsignedShortHandMatrixVector)
+  TEST_METHOD(CodeGenUnusedCB)
   TEST_METHOD(CodeGenUpdateCounter)
   TEST_METHOD(CodeGenUpperCaseRegister1);
   TEST_METHOD(CodeGenVcmp)
@@ -1767,6 +1770,38 @@ TEST_F(CompilerTest, CompileWhenIncludeMissingThenFail) {
   VERIFY_FAILED(hr);
 }
 
+TEST_F(CompilerTest, CompileWhenIncludeHasPathThenOK) {
+  CComPtr<IDxcCompiler> pCompiler;
+  LPCWSTR Source = L"c:\\temp\\OddIncludes\\main.hlsl";
+  LPCWSTR Args[] = { L"/I", L"c:\\temp" };
+  LPCWSTR ArgsUp[] = { L"/I", L"c:\\Temp" };
+  VERIFY_SUCCEEDED(CreateCompiler(&pCompiler));
+  bool useUpValues[] = { false, true };
+  for (bool useUp : useUpValues) {
+    CComPtr<IDxcOperationResult> pResult;
+    CComPtr<IDxcBlobEncoding> pSource;
+#if TEST_ON_DISK
+    CComPtr<IDxcLibrary> pLibrary;
+    VERIFY_SUCCEEDED(m_dllSupport.CreateInstance(CLSID_DxcLibrary, &pLibrary));
+    VERIFY_SUCCEEDED(pLibrary->CreateIncludeHandler(&pInclude));
+    VERIFY_SUCCEEDED(pLibrary->CreateBlobFromFile(Source, nullptr, &pSource));
+#else
+    CComPtr<TestIncludeHandler> pInclude;
+    pInclude = new TestIncludeHandler(m_dllSupport);
+    pInclude->CallResults.emplace_back("// Empty");
+    CreateBlobFromText("#include \"include.hlsl\"\r\n"
+                       "float4 main() : SV_Target { return 0; }",
+                       &pSource);
+#endif
+
+    VERIFY_SUCCEEDED(pCompiler->Compile(pSource, Source, L"main",
+      L"ps_6_0", useUp ? ArgsUp : Args, _countof(Args), nullptr, 0, pInclude, &pResult));
+    HRESULT hr;
+    VERIFY_SUCCEEDED(pResult->GetStatus(&hr));
+    VERIFY_SUCCEEDED(hr);
+ }
+}
+
 static const char EmptyCompute[] = "[numthreads(8,8,1)] void main() { }";
 
 TEST_F(CompilerTest, CompileWhenODumpThenPassConfig) {
@@ -2221,6 +2256,10 @@ TEST_F(CompilerTest, CodeGenFloatMaxtessfactor) {
 
 TEST_F(CompilerTest, CodeGenFModPS) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\fmodPS.hlsl");
+}
+
+TEST_F(CompilerTest, CodeGenFuncCast) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\func_cast.hlsl");
 }
 
 TEST_F(CompilerTest, CodeGenFunctionalCast) {
@@ -3016,6 +3055,10 @@ TEST_F(CompilerTest, CodeGenUmaxObjectAtomic) {
 
 TEST_F(CompilerTest, CodeGenUnsignedShortHandMatrixVector) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\unsignedShortHandMatrixVector.hlsl");
+}
+
+TEST_F(CompilerTest, CodeGenUnusedCB) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\unusedCB.hlsl");
 }
 
 TEST_F(CompilerTest, CodeGenUpdateCounter) {

@@ -79,6 +79,7 @@ HRESULT SetupRegistryPassForHLSL() {
     initializeDxilLegalizeResourceUsePassPass(Registry);
     initializeDxilLegalizeSampleOffsetPassPass(Registry);
     initializeDxilLegalizeStaticResourceUsePassPass(Registry);
+    initializeDxilLoadMetadataPass(Registry);
     initializeDxilPrecisePropagatePassPass(Registry);
     initializeDynamicIndexingVectorToArrayPass(Registry);
     initializeEarlyCSELegacyPassPass(Registry);
@@ -525,7 +526,6 @@ HRESULT STDMETHODCALLTYPE DxcOptimizer::RunOptimizer(
     //Err.print(argv[0], errs());
     return E_INVALIDARG;
   }
-
 
   legacy::PassManager ModulePasses;
   legacy::FunctionPassManager FunctionPasses(M.get());
