@@ -701,6 +701,9 @@ DxilResourceBase DxilModule::LoadDxilResourceBaseFromMDNode(MDNode *MD) {
 void DxilModule::LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R) {
   return m_pMDHelper->LoadDxilResourceFromMDNode(MD, R);
 }
+void DxilModule::LoadDxilSamplerFromMDNode(llvm::MDNode *MD, DxilSampler &S) {
+  return m_pMDHelper->LoadDxilSamplerFromMDNode(MD, S);
+}
 
 template <typename TResource>
 static void RemoveResources(std::vector<std::unique_ptr<TResource>> &vec,

@@ -9,17 +9,19 @@
 // CHECK: g_txDiffuse_texture_2d
 // CHECK: g_samLinear_sampler
 
-// CHECK: llvm.dbg.declare(metadata <4 x float>* %2
-// CHECK: llvm.dbg.declare(metadata float* %3
 
-// CHECK: llvm.dbg.declare(metadata <3 x float>* %0
-// CHECK: llvm.dbg.declare(metadata <2 x float>* %1
+// Input.vNormal
+// CHECK: llvm.dbg.declare(metadata <3 x float>* %
+// Input.vTexcoord
+// CHECK: llvm.dbg.declare(metadata <2 x float>* %
 
 // CHECK: llvm.dbg.declare(metadata [4 x float]* %vDiffuse
 // CHECK: llvm.dbg.declare(metadata float* %fLighting
 
-// CHECK: llvm.dbg.declare(metadata <4 x float>* %2
-// CHECK: llvm.dbg.declare(metadata float* %3
+// Output.c
+// CHECK: llvm.dbg.declare(metadata <4 x float>* %
+// Output.d
+// CHECK: llvm.dbg.declare(metadata float* %
 
 // CHECK: DILocalVariable(tag: DW_TAG_arg_variable, name: "main.Ret"
 // CHECK: DIExpression(DW_OP_bit_piece, 0, 16)

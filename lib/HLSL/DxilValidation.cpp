@@ -647,8 +647,65 @@ static DxilSignatureElement *ValidateSignatureAccess(Instruction *I, DxilSignatu
   return &SE;
 }
 
+static MDNode *GetResourceAttribute(Value *handle, ValidationContext &ValCtx) {
+
+  DxilTypeSystem &typeSys = ValCtx.DxilMod.GetTypeSystem();
+  MDNode *MD = nullptr;
+  if (Argument *Arg = dyn_cast<Argument>(handle)) {
+    Function *F = Arg->getParent();
+    if (DxilFunctionAnnotation *FuncAnnot = typeSys.GetFunctionAnnotation(F)) {
+      DxilParameterAnnotation &ParamAnnot =
+          FuncAnnot->GetParameterAnnotation(Arg->getArgNo());
+      MD = ParamAnnot.GetResourceAttribute();
+    }
+  } else if (LoadInst *LI = dyn_cast<LoadInst>(handle)) {
+    handle = LI->getPointerOperand();
+    for (User *U : handle->users()) {
+      if (CallInst *CI = dyn_cast<CallInst>(U)) {
+        Function *F = CI->getCalledFunction();
+        unsigned ArgNo = 0;
+        for (unsigned i = 0; i < CI->getNumArgOperands(); i++) {
+          if (CI->getArgOperand(i) == handle) {
+            ArgNo = i;
+            break;
+          }
+        }
+        if (DxilFunctionAnnotation *FuncAnnot =
+                typeSys.GetFunctionAnnotation(F)) {
+          DxilParameterAnnotation &ParamAnnot =
+              FuncAnnot->GetParameterAnnotation(ArgNo);
+          MD = ParamAnnot.GetResourceAttribute();
+          break;
+        }
+      }
+    }
+  }
+
+  return MD;
+}
+
+static void GetSamplerKind(Value *handle, DXIL::SamplerKind &Kind,
+                           ValidationContext &ValCtx) {
+  MDNode *MD = GetResourceAttribute(handle, ValCtx);
+
+  if (!MD) {
+    Kind = DXIL::SamplerKind::Invalid;
+    return;
+  }
+
+  DxilSampler S;
+
+  ValCtx.DxilMod.LoadDxilSamplerFromMDNode(MD, S);
+
+  Kind = S.GetSamplerKind();
+}
+
 static DXIL::SamplerKind GetSamplerKind(Value *samplerHandle, ValidationContext &ValCtx) {
   if (!isa<CallInst>(samplerHandle)) {
+    DXIL::SamplerKind Kind = DXIL::SamplerKind::Invalid;
+    GetSamplerKind(samplerHandle, Kind, ValCtx);
+    if (Kind != DXIL::SamplerKind::Invalid)
+      return Kind;
     ValCtx.EmitError(ValidationRule::InstrHandleNotFromCreateHandle);
     return DXIL::SamplerKind::Invalid;
   }
@@ -707,37 +764,7 @@ static DXIL::ResourceKind
 GetResourceKindAndCompTy(Value *handle, DXIL::ComponentType &CompTy,
                          DXIL::ResourceClass &ResClass,
                          ValidationContext &ValCtx) {
-  DxilTypeSystem &typeSys = ValCtx.DxilMod.GetTypeSystem();
-  MDNode *MD = nullptr;
-  if (Argument *Arg = dyn_cast<Argument>(handle)) {
-    Function *F = Arg->getParent();
-    if (DxilFunctionAnnotation *FuncAnnot = typeSys.GetFunctionAnnotation(F)) {
-      DxilParameterAnnotation &ParamAnnot =
-          FuncAnnot->GetParameterAnnotation(Arg->getArgNo());
-      MD = ParamAnnot.GetResourceAttribute();
-    }
-  } else if (LoadInst *LI = dyn_cast<LoadInst>(handle)) {
-    handle = LI->getPointerOperand();
-    for (User *U : handle->users()) {
-      if (CallInst *CI = dyn_cast<CallInst>(U)) {
-        Function *F = CI->getCalledFunction();
-        unsigned ArgNo = 0;
-        for (unsigned i = 0; i < CI->getNumArgOperands(); i++) {
-          if (CI->getArgOperand(i) == handle) {
-            ArgNo = i;
-            break;
-          }
-        }
-        if (DxilFunctionAnnotation *FuncAnnot =
-                typeSys.GetFunctionAnnotation(F)) {
-          DxilParameterAnnotation &ParamAnnot =
-              FuncAnnot->GetParameterAnnotation(ArgNo);
-          MD = ParamAnnot.GetResourceAttribute();
-          break;
-        }
-      }
-    }
-  }
+  MDNode *MD = GetResourceAttribute(handle, ValCtx);
 
   if (!MD)
     return DXIL::ResourceKind::Invalid;

@@ -88,6 +88,7 @@ public:
 
   DxilResourceBase LoadDxilResourceBaseFromMDNode(llvm::MDNode *MD);
   void LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R);
+  void LoadDxilSamplerFromMDNode(llvm::MDNode *MD, DxilSampler &S);
 
   void RemoveUnusedResources();
   void RemoveFunction(llvm::Function *F);

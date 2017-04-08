@@ -924,6 +924,25 @@ void DxilMDHelper::LoadDxilResourceFromMDNode(llvm::MDNode *MD,
   }
 }
 
+void DxilMDHelper::LoadDxilSamplerFromMDNode(llvm::MDNode *MD, DxilSampler &S) {
+  IFTBOOL(MD->getNumOperands() >=
+              DxilMDHelper::kHLDxilResourceAttributeNumFields,
+          DXC_E_INCORRECT_DXIL_METADATA);
+
+  DxilResource::Class RC = static_cast<DxilResource::Class>(ConstMDToUint32(
+      MD->getOperand(DxilMDHelper::kHLDxilResourceAttributeClass)));
+  const MDOperand &Meta =
+      MD->getOperand(DxilMDHelper::kHLDxilResourceAttributeMeta);
+
+  switch (RC) {
+  case DxilResource::Class::Sampler: {
+    LoadDxilSampler(Meta, S);
+  } break;
+  default:
+    DXASSERT(0, "Invalid metadata");
+  }
+}
+
 //
 // DxilExtraPropertyHelper shader-specific methods.
 //

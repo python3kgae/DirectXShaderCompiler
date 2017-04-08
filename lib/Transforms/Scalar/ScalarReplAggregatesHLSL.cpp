@@ -2449,11 +2449,13 @@ void SROA_Helper::RewriteForGEP(GEPOperator *GEP, IRBuilder<> &Builder) {
   }
 }
 
-static Type *getArrayEltType(Type *T) {
-  while (isa<ArrayType>(T)) {
-    T = T->getArrayElementType();
+static Type *GetArrayEltTy(Type *Ty) {
+  if (isa<PointerType>(Ty))
+    Ty = Ty->getPointerElementType();
+  while (isa<ArrayType>(Ty)) {
+    Ty = Ty->getArrayElementType();
   }
-  return T;
+  return Ty;
 }
 
 /// isVectorOrStructArray - Check if T is array of vector or struct.
@@ -2461,7 +2463,7 @@ static bool isVectorOrStructArray(Type *T) {
   if (!T->isArrayTy())
     return false;
 
-  T = getArrayEltType(T);
+  T = GetArrayEltTy(T);
 
   return T->isStructTy() || T->isVectorTy();
 }
@@ -3475,6 +3477,7 @@ private:
                   std::vector<DxilParameterAnnotation> &FlatRetAnnotationList,
                   IRBuilder<> &Builder, DbgDeclareInst *DDI);
   void replaceCastArgument(Value *&NewArg, Value *OldArg,
+                           DxilParamInputQual inputQual,
                            IRBuilder<> &CallBuilder, IRBuilder<> &RetBuilder);
   // Replace use of parameter which changed type when flatten.
   // Also add information to Arg if required.
@@ -3492,7 +3495,9 @@ private:
   // Map from orginal function to the flatten version.
   std::unordered_map<Function *, Function *> funcMap;
   // Map from original arg/param to flatten cast version.
-  std::unordered_map<Value *, Value*> castParamMap;
+  std::unordered_map<Value *, std::pair<Value*, DxilParamInputQual>> castParamMap;
+  // Map form first element of a vector the list of all elements of the vector.
+  std::unordered_map<Value *, SmallVector<Value*, 4> > vectorEltsMap;
   bool m_HasDbgInfo;
 };
 }
@@ -3632,15 +3637,6 @@ static DxilFieldAnnotation &GetEltAnnotation(Type *Ty, unsigned idx, DxilFieldAn
   return annotation;  
 }
 
-static Type *GetArrayEltTy(Type *Ty) {
-  if (isa<PointerType>(Ty))
-    Ty = Ty->getPointerElementType();
-  while (isa<ArrayType>(Ty)) {
-    Ty = Ty->getArrayElementType();
-  }
-  return Ty;
-}
-
 // Note: Semantic index allocation.
 // Semantic index is allocated base on linear layout.
 // For following code
@@ -3769,49 +3765,279 @@ void SROA_Parameter_HLSL::allocateSemanticIndex(
   }
 }
 
+static void CopyHandleToResourcePtr(Value *Handle, Value *ResPtr, HLModule &HLM,
+                                    IRBuilder<> &Builder) {
+  // Cast it to resource.
+  Type *ResTy = ResPtr->getType()->getPointerElementType();
+  Value *Res = HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLCast,
+                                       (unsigned)HLCastOpcode::HandleToResCast,
+                                       ResTy, {Handle}, *HLM.GetModule());
+  // Store casted resource to OldArg.
+  Builder.CreateStore(Res, ResPtr);
+}
+
+static void CopyHandlePtrToResourcePtr(Value *HandlePtr, Value *ResPtr,
+                                       HLModule &HLM, IRBuilder<> &Builder) {
+  // Load the handle.
+  Value *Handle = Builder.CreateLoad(HandlePtr);
+  CopyHandleToResourcePtr(Handle, ResPtr, HLM, Builder);
+}
+
+static Value *CastResourcePtrToHandle(Value *Res, Type *HandleTy, HLModule &HLM,
+                                      IRBuilder<> &Builder) {
+  // Load OldArg.
+  Value *LdRes = Builder.CreateLoad(Res);
+  Value *Handle = HLM.EmitHLOperationCall(
+      Builder, HLOpcodeGroup::HLCreateHandle,
+      /*opcode*/ 0, HandleTy, {LdRes}, *HLM.GetModule());
+  return Handle;
+}
+
+static void CopyResourcePtrToHandlePtr(Value *Res, Value *HandlePtr,
+                                       HLModule &HLM, IRBuilder<> &Builder) {
+  Type *HandleTy = HandlePtr->getType()->getPointerElementType();
+  Value *Handle = CastResourcePtrToHandle(Res, HandleTy, HLM, Builder);
+  Builder.CreateStore(Handle, HandlePtr);
+}
+// TODO: support arrayPtrToMatrixPtr.
+
+static void CopyVectorPtrToEltsPtr(Value *VecPtr, ArrayRef<Value *> elts,
+                                   unsigned vecSize, IRBuilder<> &Builder) {
+  Value *Vec = Builder.CreateLoad(VecPtr);
+  for (unsigned i = 0; i < vecSize; i++) {
+    Value *Elt = Builder.CreateExtractElement(Vec, i);
+    Builder.CreateStore(Elt, elts[i]);
+  }
+}
+
+static void CopyEltsPtrToVectorPtr(ArrayRef<Value *> elts, Value *VecPtr,
+                                   Type *VecTy, unsigned vecSize,
+                                   IRBuilder<> &Builder) {
+  Value *Vec = UndefValue::get(VecTy);
+  for (unsigned i = 0; i < vecSize; i++) {
+    Value *Elt = Builder.CreateLoad(elts[i]);
+    Vec = Builder.CreateInsertElement(Vec, Elt, i);
+  }
+  Builder.CreateStore(Vec, VecPtr);
+}
+
+using CopyFunctionTy = void(Value *FromPtr, Value *ToPtr, HLModule &HLM,
+                            Type *HandleTy, IRBuilder<> &Builder);
+
+static void CastCopyArray(Value *FromArray, Value *ToArray, Type *CurFromTy,
+                          Type *CurToTy, std::vector<Value *> &idxList,
+                          Type *HandleTy, HLModule &HLM, IRBuilder<> &Builder,
+                          CopyFunctionTy CastCopyFn) {
+  if (!CurFromTy->isArrayTy() || !CurToTy->isArrayTy()) {
+    Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
+    Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
+    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
+  } else {
+    unsigned size = CurFromTy->getArrayNumElements();
+    Type *FromEltTy = CurFromTy->getArrayElementType();
+    Type *ToEltTy = CurToTy->getArrayElementType();
+    for (unsigned i = 0; i < size; i++) {
+      idxList.push_back(Builder.getInt32(i));
+      CastCopyArray(FromArray, ToArray, FromEltTy, ToEltTy, idxList, HandleTy,
+                    HLM, Builder, CastCopyFn);
+      idxList.pop_back();
+    }
+  }
+}
+
+static void CastCopyArrayMultiDimTo1Dim(Value *FromArray, Value *ToArray,
+                                        Type *CurFromTy,
+                                        std::vector<Value *> &idxList,
+                                        unsigned calcIdx, Type *HandleTy,
+                                        HLModule &HLM, IRBuilder<> &Builder,
+                                        CopyFunctionTy CastCopyFn) {
+  if (CurFromTy->isVectorTy()) {
+    // Copy vector to array.
+    Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
+    Value *V = Builder.CreateLoad(FromPtr);
+    unsigned vecSize = CurFromTy->getVectorNumElements();
+    Value *zeroIdx = Builder.getInt32(0);
+    for (unsigned i = 0; i < vecSize; i++) {
+      Value *ToPtr = Builder.CreateInBoundsGEP(
+          ToArray, {zeroIdx, Builder.getInt32(calcIdx++)});
+      Value *Elt = Builder.CreateExtractElement(V, i);
+      Builder.CreateStore(Elt, ToPtr);
+    }
+  } else if (!CurFromTy->isArrayTy()) {
+    Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
+    Value *ToPtr = Builder.CreateInBoundsGEP(
+        ToArray, {Builder.getInt32(0), Builder.getInt32(calcIdx)});
+    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
+  } else {
+    unsigned size = CurFromTy->getArrayNumElements();
+    Type *FromEltTy = CurFromTy->getArrayElementType();
+    for (unsigned i = 0; i < size; i++) {
+      idxList.push_back(Builder.getInt32(i));
+      unsigned idx = calcIdx * size + i;
+      CastCopyArrayMultiDimTo1Dim(FromArray, ToArray, FromEltTy, idxList, idx,
+                                  HandleTy, HLM, Builder, CastCopyFn);
+      idxList.pop_back();
+    }
+  }
+}
+
+static void CastCopyArray1DimToMultiDim(Value *FromArray, Value *ToArray,
+                                        Type *CurToTy,
+                                        std::vector<Value *> &idxList,
+                                        unsigned calcIdx, Type *HandleTy,
+                                        HLModule &HLM, IRBuilder<> &Builder,
+                                        CopyFunctionTy CastCopyFn) {
+  if (CurToTy->isVectorTy()) {
+    // Copy array to vector.
+    Value *V = UndefValue::get(CurToTy);
+    unsigned vecSize = CurToTy->getVectorNumElements();
+    Value *zeroIdx = Builder.getInt32(0);
+    Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
+    for (unsigned i = 0; i < vecSize; i++) {
+      Value *FromPtr = Builder.CreateInBoundsGEP(
+          FromArray, {zeroIdx, Builder.getInt32(calcIdx++)});
+      Value *Elt = Builder.CreateLoad(FromPtr);
+      V = Builder.CreateInsertElement(V, Elt, i);
+    }
+    Builder.CreateStore(V, ToPtr);
+  } else if (!CurToTy->isArrayTy()) {
+    Value *FromPtr = Builder.CreateInBoundsGEP(
+        FromArray, {Builder.getInt32(0), Builder.getInt32(calcIdx)});
+    Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
+    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
+  } else {
+    unsigned size = CurToTy->getArrayNumElements();
+    Type *ToEltTy = CurToTy->getArrayElementType();
+    for (unsigned i = 0; i < size; i++) {
+      idxList.push_back(Builder.getInt32(i));
+      unsigned idx = calcIdx * size + i;
+      CastCopyArray1DimToMultiDim(FromArray, ToArray, ToEltTy, idxList, idx,
+                                  HandleTy, HLM, Builder, CastCopyFn);
+      idxList.pop_back();
+    }
+  }
+}
+
+static void CastCopyOldPtrToNewPtr(Value *OldPtr, Value *NewPtr, HLModule &HLM,
+                                   Type *HandleTy, IRBuilder<> &Builder) {
+  Type *NewTy = NewPtr->getType()->getPointerElementType();
+  Type *OldTy = OldPtr->getType()->getPointerElementType();
+  if (NewTy == HandleTy) {
+    CopyResourcePtrToHandlePtr(OldPtr, NewPtr, HLM, Builder);
+  } else if (OldTy->isVectorTy()) {
+    // Copy vector to array.
+    Value *V = Builder.CreateLoad(OldPtr);
+    unsigned vecSize = OldTy->getVectorNumElements();
+    Value *zeroIdx = Builder.getInt32(0);
+    for (unsigned i = 0; i < vecSize; i++) {
+      Value *EltPtr = Builder.CreateGEP(NewPtr, {zeroIdx, Builder.getInt32(i)});
+      Value *Elt = Builder.CreateExtractElement(V, i);
+      Builder.CreateStore(Elt, EltPtr);
+    }
+  } else if (OldTy->isArrayTy()) {
+    std::vector<Value *> idxList;
+    idxList.emplace_back(Builder.getInt32(0));
+    CastCopyArrayMultiDimTo1Dim(OldPtr, NewPtr, OldTy, idxList, /*calcIdx*/0, HandleTy, HLM, Builder,
+                  CastCopyOldPtrToNewPtr);
+  }
+}
+
+static void CastCopyNewPtrToOldPtr(Value *NewPtr, Value *OldPtr, HLModule &HLM,
+                                   Type *HandleTy, IRBuilder<> &Builder) {
+  Type *NewTy = NewPtr->getType()->getPointerElementType();
+  Type *OldTy = OldPtr->getType()->getPointerElementType();
+  if (NewTy == HandleTy) {
+    CopyHandlePtrToResourcePtr(NewPtr, OldPtr, HLM, Builder);
+  } else if (OldTy->isVectorTy()) {
+    // Copy array to vector.
+    Value *V = UndefValue::get(OldTy);
+    unsigned vecSize = OldTy->getVectorNumElements();
+    Value *zeroIdx = Builder.getInt32(0);
+    for (unsigned i = 0; i < vecSize; i++) {
+      Value *EltPtr = Builder.CreateGEP(NewPtr, {zeroIdx, Builder.getInt32(i)});
+      Value *Elt = Builder.CreateLoad(EltPtr);
+      V = Builder.CreateInsertElement(V, Elt, i);
+    }
+    Builder.CreateStore(V, OldPtr);
+  } else if (OldTy->isArrayTy()) {
+    std::vector<Value *> idxList;
+    idxList.emplace_back(Builder.getInt32(0));
+    CastCopyArray1DimToMultiDim(NewPtr, OldPtr, OldTy, idxList, /*calcIdx*/0, HandleTy, HLM, Builder,
+                  CastCopyNewPtrToOldPtr);
+  }
+}
+
 void SROA_Parameter_HLSL::replaceCastArgument(Value *&NewArg, Value *OldArg,
+                                              DxilParamInputQual inputQual,
                                               IRBuilder<> &CallBuilder,
                                               IRBuilder<> &RetBuilder) {
   Type *HandleTy = m_pHLModule->GetOP()->GetHandleType();
-  Type *HandlePtrTy = PointerType::get(HandleTy, 0);
-  Module &M = *m_pHLModule->GetModule();
 
   Type *NewTy = NewArg->getType();
   Type *OldTy = OldArg->getType();
 
+  bool bIn = inputQual == DxilParamInputQual::Inout ||
+             inputQual == DxilParamInputQual::In;
+  bool bOut = inputQual == DxilParamInputQual::Inout ||
+              inputQual == DxilParamInputQual::Out;
+
   if (NewArg->getType() == HandleTy) {
-    // Load OldArg.
-    Value *LdRes = CallBuilder.CreateLoad(OldArg);
-    Value *Handle = m_pHLModule->EmitHLOperationCall(
-        CallBuilder, HLOpcodeGroup::HLCreateHandle,
-        /*opcode*/ 0, HandleTy, {LdRes}, M);
+    Value *Handle =
+        CastResourcePtrToHandle(OldArg, HandleTy, *m_pHLModule, CallBuilder);
     // Use Handle as NewArg.
     NewArg = Handle;
-  } else if (NewTy == HandlePtrTy) {
-    // Out handle arg.
-    // Load the handle.
-    Value *Handle = RetBuilder.CreateLoad(NewArg);
-    // Cast it to resource.
-    Type *ResTy = OldTy->getPointerElementType();
-    // Replace resource ptr use with Handle inside current function.
-    Value *Cast = m_pHLModule->EmitHLOperationCall(
-              RetBuilder, HLOpcodeGroup::HLCast,
-              (unsigned)HLCastOpcode::HandleToResCast, ResTy, {Handle}, M);
-    // Store casted resource to OldArg.
-    RetBuilder.CreateStore(Cast, OldArg);
-  } else if (OldTy->isVectorTy()) {
-    // Vector will be lowered to array.
-    unsigned vecSize = OldTy->getVectorNumElements();
-    Value *zeroIdx = CallBuilder.getInt32(0);
-    // Store vector to array.
-    for (unsigned i = 0; i < vecSize; i++) {
-      Value *GEP =
-          CallBuilder.CreateInBoundsGEP(NewArg, {zeroIdx, CallBuilder.getInt32(i)});
-      Value *Elt = CallBuilder.CreateExtractElement(OldArg, i);
-      CallBuilder.CreateStore(Elt, GEP);
+  } else if (vectorEltsMap.count(NewArg)) {
+    Type *VecTy = OldTy;
+    if (VecTy->isPointerTy())
+      VecTy = VecTy->getPointerElementType();
+
+    // Flattened vector.
+    SmallVector<Value *, 4> &elts = vectorEltsMap[NewArg];
+    unsigned vecSize = elts.size();
+
+    if (NewTy->isPointerTy()) {
+      if (bIn) {
+        // Copy OldArg to NewArg before Call.
+        CopyVectorPtrToEltsPtr(OldArg, elts, vecSize, CallBuilder);
+      }
+
+      // bOut must be true here.
+      // Store NewArg to  OldArg after Call.
+      CopyEltsPtrToVectorPtr(elts, OldArg, VecTy, vecSize, RetBuilder);
+    } else {
+      // Must be in parameter.
+      // Copy OldArg to NewArg before Call.
+      Value *Vec = OldArg;
+      if (OldTy->isPointerTy()) {
+        Vec = CallBuilder.CreateLoad(OldArg);
+      }
+
+      for (unsigned i = 0; i < vecSize; i++) {
+        Value *Elt = CallBuilder.CreateExtractElement(Vec, i);
+        // Save elt to update arg in createFlattenedFunctionCall.
+        elts[i] = Elt;
+      }
+    }
+  } else if (!NewTy->isPointerTy()) {
+    // Ptr param is cast to non-ptr param.
+    // Must be in param.
+    // Load OldArg as NewArg before call.
+    NewArg = CallBuilder.CreateLoad(OldArg);
+  } else {
+    // NewTy is pointer type.
+    // Copy OldArg to NewArg before Call.
+    if (bIn) {
+      CastCopyOldPtrToNewPtr(OldArg, NewArg, *m_pHLModule, HandleTy,
+                             CallBuilder);
+    }
+    if (bOut) {
+      // Store NewArg to OldArg after Call.
+      CastCopyNewPtrToOldPtr(NewArg, OldArg, *m_pHLModule, HandleTy,
+                             RetBuilder);
     }
   }
 }
+
 void SROA_Parameter_HLSL::replaceCastParameter(
     Value *NewParam, Value *OldParam, Function &F, Argument *Arg,
     const DxilParamInputQual inputQual, IRBuilder<> &Builder) {
@@ -3822,63 +4048,108 @@ void SROA_Parameter_HLSL::replaceCastParameter(
   Type *NewTy = NewParam->getType();
   Type *OldTy = OldParam->getType();
 
+  bool bIn = inputQual == DxilParamInputQual::Inout ||
+             inputQual == DxilParamInputQual::In;
+  bool bOut = inputQual == DxilParamInputQual::Inout ||
+              inputQual == DxilParamInputQual::Out;
+
+  // Make sure InsertPoint after OldParam inst.
+  if (Instruction *I = dyn_cast<Instruction>(OldParam)) {
+    Builder.SetInsertPoint(I->getNextNode());
+  }
+
+  if (DbgDeclareInst *DDI = llvm::FindAllocaDbgDeclare(OldParam)) {
+    // Add debug info to new param.
+    DIBuilder DIB(*F.getParent(), /*AllowUnresolved*/ false);
+    DIExpression *DDIExp = DDI->getExpression();
+    DIB.insertDeclare(NewParam, DDI->getVariable(), DDIExp, DDI->getDebugLoc(),
+                      Builder.GetInsertPoint());
+  }
+
+
+  if (isa<Argument>(OldParam) && OldTy->isPointerTy()) {
+    // OldParam will be removed with Old function.
+    // Create alloca to replace it.
+    Value *AllocParam = Builder.CreateAlloca(OldTy->getPointerElementType());
+    OldParam->replaceAllUsesWith(AllocParam);
+    OldParam = AllocParam;
+  }
+
   if (NewTy == HandleTy) {
-    // Replace resource ptr use with Handle inside current function.
-    // Later pass will remove the cast by replace Ld+createHandle with handle.
-    Value *Cast = m_pHLModule->EmitHLOperationCall(
-              Builder, HLOpcodeGroup::HLCast,
-              (unsigned)HLCastOpcode::HandleToResCast, OldTy, {NewParam}, M);
-    OldParam->replaceAllUsesWith(Cast);
+    CopyHandleToResourcePtr(NewParam, OldParam, *m_pHLModule, Builder);
     // Save resource attribute.
     Type *ResTy = OldTy->getPointerElementType();
     MDNode *MD = HLModule::GetDxilResourceAttrib(ResTy, M);
     m_pHLModule->MarkDxilResourceAttrib(Arg, MD);
-  } else if (NewTy == HandlePtrTy) {
-    // Out handle param.
-    // For every ret, ld from OldParam, createHandle from it.
-    if (isa<Argument>(OldParam)) {
-      // Create alloca to replace OldParam.
-      // OldParam will be removed with Old function.
-      Value *AllocParam = Builder.CreateAlloca(OldTy->getPointerElementType());
-      OldParam->replaceAllUsesWith(AllocParam);
-      OldParam = AllocParam;
-    }
+  } else if (vectorEltsMap.count(NewParam)) {
+    // Vector is flattened to scalars.
+    Type *VecTy = OldTy;
+    if (VecTy->isPointerTy())
+      VecTy = VecTy->getPointerElementType();
 
-    Type *ResTy = OldTy->getPointerElementType();
-    if (inputQual == DxilParamInputQual::Inout) {
-      // Store handle to resource param for inout case.
-      Value *Handle = Builder.CreateLoad(NewParam);
-      Value *Cast = m_pHLModule->EmitHLOperationCall(
-          Builder, HLOpcodeGroup::HLCast,
-          (unsigned)HLCastOpcode::HandleToResCast, ResTy, {Handle}, M);
-      Builder.CreateStore(Cast, OldParam);
-    }
-    // Store the handle to NewParam.
-    for (auto &BB : F.getBasicBlockList()) {
-      if (ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
-         IRBuilder<> RetBuilder(RI);
-         Value *LdRes = RetBuilder.CreateLoad(OldParam);
-         Value *Handle = m_pHLModule->EmitHLOperationCall(
-             RetBuilder, HLOpcodeGroup::HLCreateHandle,
-             /*opcode*/0, HandleTy, {LdRes}, M);
-         RetBuilder.CreateStore(Handle, NewParam);
+    // Flattened vector.
+    SmallVector<Value *, 4> &elts = vectorEltsMap[NewParam];
+    unsigned vecSize = elts.size();
+
+    if (NewTy->isPointerTy()) {
+      if (bIn) {
+        // Copy NewParam to OldParam at entry.
+        CopyEltsPtrToVectorPtr(elts, OldParam, VecTy, vecSize, Builder);
+      }
+      // bOut must be true here.
+      // Store the OldParam to NewParam before every return.
+      for (auto &BB : F.getBasicBlockList()) {
+        if (ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+          IRBuilder<> RetBuilder(RI);
+          CopyVectorPtrToEltsPtr(OldParam, elts, vecSize, RetBuilder);
+        }
+      }
+    } else {
+      // Must be in parameter.
+      // Copy NewParam to OldParam at entry.
+      Value *Vec = UndefValue::get(VecTy);
+      for (unsigned i = 0; i < vecSize; i++) {
+        Vec = Builder.CreateInsertElement(Vec, elts[i], i);
+      }
+      if (OldTy->isPointerTy()) {
+        Builder.CreateStore(Vec, OldParam);
+      } else {
+        OldParam->replaceAllUsesWith(Vec);
       }
     }
-    // Save resource attribute.
-    MDNode *MD = HLModule::GetDxilResourceAttrib(ResTy, M);
-    m_pHLModule->MarkDxilResourceAttrib(Arg, MD);
-  } else if (OldTy->isVectorTy()) {
-    // Vector will be lowered to array.
-    Value *NewVal = UndefValue::get(OldTy);
-    unsigned vecSize = OldTy->getVectorNumElements();
-    Value *zeroIdx = Builder.getInt32(0);
-    for (unsigned i = 0; i < vecSize; i++) {
-      Value *GEP =
-          Builder.CreateInBoundsGEP(NewParam, {zeroIdx, Builder.getInt32(i)});
-      Value *Elt = Builder.CreateLoad(GEP);
-      NewVal = Builder.CreateInsertElement(NewVal, Elt, i);
+
+  } else if (!NewTy->isPointerTy()) {
+    // Ptr param is cast to non-ptr param.
+    // Must be in param.
+    // Store NewParam to OldParam at entry.
+    Builder.CreateStore(NewParam, OldParam);
+  } else {
+    // NewTy is pointer type.
+    if (bIn) {
+      // Copy NewParam to OldParam at entry.
+      CastCopyNewPtrToOldPtr(NewParam, OldParam, *m_pHLModule, HandleTy,
+                             Builder);
     }
-    OldParam->replaceAllUsesWith(NewVal);
+    if (bOut) {
+      // Store the OldParam to NewParam before every return.
+      for (auto &BB : F.getBasicBlockList()) {
+        if (ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
+          IRBuilder<> RetBuilder(RI);
+          CastCopyOldPtrToNewPtr(OldParam, NewParam, *m_pHLModule, HandleTy,
+                                 RetBuilder);
+        }
+      }
+    }
+
+    Type *NewEltTy = GetArrayEltTy(NewTy);
+    Type *OldEltTy = GetArrayEltTy(OldTy);
+
+    if (NewEltTy == HandlePtrTy) {
+      // Save resource attribute.
+      Type *ResTy = OldEltTy;
+      MDNode *MD = HLModule::GetDxilResourceAttrib(ResTy, M);
+      m_pHLModule->MarkDxilResourceAttrib(Arg, MD);
+    }
   }
 }
 
@@ -3914,8 +4185,13 @@ void SROA_Parameter_HLSL::flattenArgument(
   bool bSemOverride = !semantic.empty();
 
   bool bForParam = F == Builder.GetInsertPoint()->getParent()->getParent();
-  bool bOut = paramAnnotation.GetParamInputQual() == DxilParamInputQual::Out ||
-              paramAnnotation.GetParamInputQual() == DxilParamInputQual::Inout;
+  DxilParamInputQual inputQual = paramAnnotation.GetParamInputQual();
+  bool bOut = inputQual == DxilParamInputQual::Out ||
+              inputQual == DxilParamInputQual::Inout ||
+              inputQual == DxilParamInputQual::OutStream0 ||
+              inputQual == DxilParamInputQual::OutStream1 ||
+              inputQual == DxilParamInputQual::OutStream2 ||
+              inputQual == DxilParamInputQual::OutStream3;
 
   // Map from semantic string to type.
   llvm::StringMap<Type *> semanticTypeMap;
@@ -3994,14 +4270,10 @@ void SROA_Parameter_HLSL::flattenArgument(
 
       annotationMap.erase(V);
 
-      // Now erase any instructions that were made dead while rewriting the
-      // alloca.
-      DeleteDeadInstructions();
-
-      DXASSERT_NOMSG(V->user_empty());
       ++NumReplaced;
-      if (Instruction *I = dyn_cast<Instruction>(V))
+      if (Instruction *I = dyn_cast<Instruction>(V)) {
         deadAllocas.emplace_back(I);
+      }
     } else {
       if (bSemOverride) {
         if (!annotation.GetSemanticString().empty()) {
@@ -4088,40 +4360,102 @@ void SROA_Parameter_HLSL::flattenArgument(
         }
         continue;
       }
+      // Remove pointer for vector/scalar which is not out.
+      if (V->getType()->isPointerTy() && !Ty->isAggregateType() && !bOut) {
+        Value *Ptr = Builder.CreateAlloca(Ty);
+        V->replaceAllUsesWith(Ptr);
+        // Create load here to make correct type.
+        // The Ptr will be store with correct value in replaceCastParameter and
+        // replaceCastArgument.
+        V = Builder.CreateLoad(Ptr);
+        castParamMap[V] = std::make_pair(Ptr, inputQual);
+      }
 
       // Lower resource type to handle ty.
       if (HLModule::IsHLSLObjectType(Ty) &&
           !HLModule::IsStreamOutputPtrType(V->getType())) {
         Value *Res = V;
-
         if (!bOut) {
           Value *LdRes = Builder.CreateLoad(Res);
           V = m_pHLModule->EmitHLOperationCall(
               Builder, HLOpcodeGroup::HLCreateHandle,
-              /*opcode*/0, HandleTy, {LdRes}, M);
-          castParamMap[V] = Res;
+              /*opcode*/ 0, HandleTy, {LdRes}, M);
         } else {
           V = Builder.CreateAlloca(HandleTy);
-          castParamMap[V] = Res;
         }
+        castParamMap[V] = std::make_pair(Res, inputQual);
       } else if (Ty->isArrayTy()) {
-        std::vector<unsigned> arraySize;
-        while (Ty->isArrayTy()) {
-          arraySize.emplace_back(Ty->getArrayNumElements());
-          Ty = Ty->getArrayElementType();
+        unsigned arraySize = 1;
+        Type *AT = Ty;
+        while (AT->isArrayTy()) {
+          arraySize *= AT->getArrayNumElements();
+          AT = AT->getArrayElementType();
         }
-        if (HLModule::IsHLSLObjectType(Ty)) {
-          DXASSERT_NOMSG(0);
+        if (HLModule::IsHLSLObjectType(AT)) {
+          Value *Res = V;
+          Type *Ty = ArrayType::get(HandleTy, arraySize);
+          V = Builder.CreateAlloca(Ty);
+          castParamMap[V] = std::make_pair(Res, inputQual);
         }
       }
 
       if (!hasShaderInputOutput) {
         if (Ty->isVectorTy()) {
           Value *OldV = V;
-          ArrayType *AT = ArrayType::get(Ty->getVectorElementType(),
-                                         Ty->getVectorNumElements());
-          V = Builder.CreateAlloca(AT);
-          castParamMap[V] = OldV;
+          Type *EltTy = Ty->getVectorElementType();
+          unsigned vecSize = Ty->getVectorNumElements();
+
+          // Split vector into scalars.
+          if (OldV->getType()->isPointerTy()) {
+            // Split into scalar ptr.
+            V = Builder.CreateAlloca(EltTy);
+            vectorEltsMap[V].emplace_back(V);
+            for (unsigned i = 1; i < vecSize; i++) {
+              Value *Elt = Builder.CreateAlloca(EltTy);
+              vectorEltsMap[V].emplace_back(Elt);
+            }
+          } else {
+            // Split into scalar.
+            V = Builder.CreateExtractElement(OldV, (uint64_t)0);
+            vectorEltsMap[V].emplace_back(V);
+            for (unsigned i = 1; i < vecSize; i++) {
+              Value *Elt = Builder.CreateExtractElement(OldV, (uint64_t)0);
+              vectorEltsMap[V].emplace_back(Elt);
+            }
+          }
+          // Add to work list by reverse order.
+          for (unsigned i = vecSize - 1; i > 0; i--) {
+            Value *Elt = vectorEltsMap[V][i];
+            WorkList.push_front(Elt);
+          }
+          // For case OldV is from input vector ptr.
+          if (castParamMap.count(OldV)) {
+            OldV = castParamMap[OldV].first;
+          }
+          castParamMap[V] = std::make_pair(OldV, inputQual);
+        } else if (Ty->isArrayTy()) {
+          unsigned arraySize = 1;
+          Type *AT = Ty;
+          unsigned dim = 0;
+          while (AT->isArrayTy()) {
+            ++dim;
+            arraySize *= AT->getArrayNumElements();
+            AT = AT->getArrayElementType();
+          }
+          // TODO: cast matrix array.
+          if (VectorType *VT = dyn_cast<VectorType>(AT)) {
+            Value *VecArray = V;
+            Type *AT = ArrayType::get(VT->getElementType(),
+                                      arraySize * VT->getNumElements());
+            V = Builder.CreateAlloca(AT);
+            castParamMap[V] = std::make_pair(VecArray, inputQual);
+          } else if (dim > 1) {
+            // Flatten multi-dim array to 1dim.
+            Value *MultiArray = V;
+            V = Builder.CreateAlloca(
+                ArrayType::get(VT->getElementType(), arraySize));
+            castParamMap[V] = std::make_pair(MultiArray, inputQual);
+          }
         }
       }
 
@@ -4165,13 +4499,24 @@ void SROA_Parameter_HLSL::flattenArgument(
 
       // Add debug info.
       if (DDI && V != Arg) {
-        Type *Ty = V->getType();
+        Value *TmpV = V;
+        // If V is casted, add debug into to original V.
+        if (castParamMap.count(V)) {
+          TmpV = castParamMap[V].first;
+          // One more level for ptr of input vector.
+          // It cast from ptr to non-ptr then cast to scalars.
+          if (castParamMap.count(TmpV)) {
+            TmpV = castParamMap[TmpV].first;
+          }
+        }
+        Type *Ty = TmpV->getType();
         if (Ty->isPointerTy())
           Ty = Ty->getPointerElementType();
         unsigned size = DL.getTypeAllocSize(Ty);
         DIExpression *DDIExp = DIB.createBitPieceExpression(debugOffset, size);
         debugOffset += size;
-        DIB.insertDeclare(V, DDI->getVariable(), DDIExp, DDI->getDebugLoc(), DDI);
+        DIB.insertDeclare(TmpV, DDI->getVariable(), DDIExp, DDI->getDebugLoc(),
+                          Builder.GetInsertPoint());
       }
 
       // Flatten stream out.
@@ -4238,6 +4583,10 @@ void SROA_Parameter_HLSL::flattenArgument(
     }
   }
 
+  // Now erase any instructions that were made dead while rewriting the
+  // alloca.
+  DeleteDeadInstructions();
+  // Erase dead allocas after all uses deleted.
   for (Instruction *I : deadAllocas)
     I->eraseFromParent();
 
@@ -4384,21 +4733,24 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
     } else if (qual == DxilParamInputQual::Out && bLoad) {
       bNeedTemp = true;
       bLoadOutputFromTemp = true;
-    } else if (qual == DxilParamInputQual::Inout) {
-      bNeedTemp = true;
-      bLoadOutputFromTemp = true;
-      bStoreInputToTemp = true;
     } else if (bLoad && bStore) {
-      bNeedTemp = true;
       switch (qual) {
       case DxilParamInputQual::InputPrimitive:
       case DxilParamInputQual::InputPatch:
-      case DxilParamInputQual::OutputPatch:
+      case DxilParamInputQual::OutputPatch: {
+        bNeedTemp = true;
         bStoreInputToTemp = true;
+      } break;
+      case DxilParamInputQual::Inout:
         break;
       default:
         DXASSERT(0, "invalid input qual here");
       }
+    } else if (qual == DxilParamInputQual::Inout) {
+      // Only replace inout when (bLoad && bStore) == false.
+      bNeedTemp = true;
+      bLoadOutputFromTemp = true;
+      bStoreInputToTemp = true;
     }
 
     if (HLMatrixLower::IsMatrixType(Ty)) {
@@ -4725,10 +5077,8 @@ void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
     }
     Value *flatArg = *(flatArgIter++);
     if (castParamMap.count(flatArg)) {
-      const DxilParamInputQual inputQual =
-          FlatParamAnnotationList[Arg->getArgNo()].GetParamInputQual();
-      replaceCastParameter(flatArg, castParamMap[flatArg], *flatF, Arg,
-                           inputQual, Builder);
+      replaceCastParameter(flatArg, castParamMap[flatArg].first, *flatF, Arg,
+                           castParamMap[flatArg].second, Builder);
     }
     flatArg->replaceAllUsesWith(Arg);
     // Update arg debug info.
@@ -4824,6 +5174,7 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
         Value *v = RetBuilder.CreateLoad(tempArg);
         RetBuilder.CreateStore(v, arg);
       }
+
       arg = tempArg;
       flattenArgument(flatF, arg, paramAnnotation, FlatParamList,
                       FlatParamAnnotationList, AllocaBuilder,
@@ -4831,19 +5182,26 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
     } else {
       // Cast vector into array.
       if (Ty->isVectorTy()) {
-        Value *OldV = arg;
-        ArrayType *AT = ArrayType::get(Ty->getVectorElementType(),
-                                       Ty->getVectorNumElements());
-        arg = AllocaBuilder.CreateAlloca(AT);
-        castParamMap[arg] = OldV;
+        unsigned vecSize = Ty->getVectorNumElements();
+        for (unsigned vi = 0; vi < vecSize; vi++) {
+          Value *Elt = CallBuilder.CreateExtractElement(arg, vi);
+          // Cannot SROA, save it to final parameter list.
+          FlatParamList.emplace_back(Elt);
+          // Create ParamAnnotation for V.
+          FlatRetAnnotationList.emplace_back(DxilParameterAnnotation());
+          DxilParameterAnnotation &flatParamAnnotation =
+              FlatRetAnnotationList.back();
+          flatParamAnnotation = paramAnnotation;
+        }
+      } else {
+        // Cannot SROA, save it to final parameter list.
+        FlatParamList.emplace_back(arg);
+        // Create ParamAnnotation for V.
+        FlatRetAnnotationList.emplace_back(DxilParameterAnnotation());
+        DxilParameterAnnotation &flatParamAnnotation =
+            FlatRetAnnotationList.back();
+        flatParamAnnotation = paramAnnotation;
       }
-      // Cannot SROA, save it to final parameter list.
-      FlatParamList.emplace_back(arg);
-      // Create ParamAnnotation for V.
-      FlatRetAnnotationList.emplace_back(DxilParameterAnnotation());
-      DxilParameterAnnotation &flatParamAnnotation =
-          FlatRetAnnotationList.back();
-      flatParamAnnotation = paramAnnotation;
     }
   }
 
@@ -4861,10 +5219,22 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
   }
 
   RetBuilder.SetInsertPoint(CI->getNextNode());
-  for (Value *&flatArg : FlatParamList) {
+  unsigned paramSize = FlatParamList.size();
+  for (unsigned i = 0; i < paramSize; i++) {
+    Value *&flatArg = FlatParamList[i];
     if (castParamMap.count(flatArg)) {
-      replaceCastArgument(flatArg, castParamMap[flatArg], CallBuilder,
+      replaceCastArgument(flatArg, castParamMap[flatArg].first,
+                          castParamMap[flatArg].second, CallBuilder,
                           RetBuilder);
+      if (vectorEltsMap.count(flatArg) && !flatArg->getType()->isPointerTy()) {
+        // Vector elements need to be updated.
+        SmallVector<Value *, 4> &elts = vectorEltsMap[flatArg];
+        // Back one step.
+        --i;
+        for (Value *elt : elts) {
+          FlatParamList[++i] = elt;
+        }
+      }
     }
   }
 
