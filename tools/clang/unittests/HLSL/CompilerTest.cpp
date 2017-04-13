@@ -421,6 +421,7 @@ public:
   TEST_METHOD(CodeGenLoop3)
   TEST_METHOD(CodeGenLoop4)
   TEST_METHOD(CodeGenLoop5)
+  TEST_METHOD(CodeGenLoop6)
   TEST_METHOD(CodeGenMatElt)
   TEST_METHOD(CodeGenMatInit)
   TEST_METHOD(CodeGenMatMulMat)
@@ -843,6 +844,7 @@ public:
   TEST_METHOD(CodeGenDx12MiniEngineUpsampleandblurcs)
   TEST_METHOD(DxilGen_StoreOutput)
   TEST_METHOD(ConstantFolding)
+  TEST_METHOD(HoistConstantArray)
 
   dxc::DxcDllSupport m_dllSupport;
   bool m_CompilerPreservesBBNames;
@@ -2486,6 +2488,10 @@ TEST_F(CompilerTest, CodeGenLoop4) {
 
 TEST_F(CompilerTest, CodeGenLoop5) {
   CodeGenTest(L"..\\CodeGenHLSL\\loop5.hlsl");
+}
+
+TEST_F(CompilerTest, CodeGenLoop6) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\loop6.hlsl");
 }
 
 TEST_F(CompilerTest, CodeGenMatElt) {
@@ -4194,6 +4200,23 @@ TEST_F(CompilerTest, ConstantFolding) {
   CodeGenTestCheck(L"constprop\\ibfe.ll");
   CodeGenTestCheck(L"constprop\\ubfe.ll");
   CodeGenTestCheck(L"constprop\\bfi.ll");
+}
+
+TEST_F(CompilerTest, HoistConstantArray) {
+  CodeGenTestCheck(L"hca\\01.hlsl");
+  CodeGenTestCheck(L"hca\\02.hlsl");
+  CodeGenTestCheck(L"hca\\03.hlsl");
+  CodeGenTestCheck(L"hca\\04.hlsl");
+  CodeGenTestCheck(L"hca\\05.hlsl");
+  CodeGenTestCheck(L"hca\\06.hlsl");
+  CodeGenTestCheck(L"hca\\07.hlsl");
+  CodeGenTestCheck(L"hca\\08.hlsl");
+  CodeGenTestCheck(L"hca\\09.hlsl");
+  CodeGenTestCheck(L"hca\\10.hlsl");
+  CodeGenTestCheck(L"hca\\11.hlsl");
+  CodeGenTestCheck(L"hca\\12.hlsl");
+  CodeGenTestCheck(L"hca\\13.hlsl");
+  CodeGenTestCheck(L"hca\\14.hlsl");
 }
 
 TEST_F(CompilerTest, PreprocessWhenValidThenOK) {
