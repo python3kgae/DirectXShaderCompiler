@@ -186,7 +186,7 @@ void hlsl::AddHLSLMatrixTemplate(ASTContext& context, ClassTemplateDecl* vectorT
   templateRecordDecl->startDefinition();
 
   // Add an 'h' field to hold the handle.
-  // The type is vector<element, col>[row].
+  // The type is vector<element, row>[col].
   QualType elementType = context.getTemplateTypeParmType(
       /*templateDepth*/ 0, 0, ParameterPackFalse, elementTemplateParamDecl);
   Expr *sizeExpr = DeclRefExpr::Create(

@@ -926,8 +926,8 @@ static void replaceDirectInputParameter(Value *param, Function *loadInput,
           matElts[matIdx] = input;
         }
       }
-      Value *newVec = HLMatrixLower::BuildMatrix(EltTy, col, row, false,
-                                                 matElts, LocalBuilder);
+      Value *newVec =
+          HLMatrixLower::BuildVector(EltTy, col * row, matElts, LocalBuilder);
       CI->replaceAllUsesWith(newVec);
       CI->eraseFromParent();
     } break;
@@ -949,8 +949,8 @@ static void replaceDirectInputParameter(Value *param, Function *loadInput,
           matElts[matIdx] = input;
         }
       }
-      Value *newVec = HLMatrixLower::BuildMatrix(EltTy, col, row, false,
-                                                 matElts, LocalBuilder);
+      Value *newVec =
+          HLMatrixLower::BuildVector(EltTy, col * row, matElts, LocalBuilder);
       CI->replaceAllUsesWith(newVec);
       CI->eraseFromParent();
     } break;
@@ -1235,8 +1235,8 @@ void GenerateInputOutputUserCall(InputOutputAccessInfo &info, Value *undefVertex
           matElts[matIdx] = input;
         }
       }
-      Value *newVec = HLMatrixLower::BuildMatrix(EltTy, col, row, true, matElts,
-                                                 LocalBuilder);
+      Value *newVec =
+          HLMatrixLower::BuildVector(EltTy, col * row, matElts, LocalBuilder);
       CI->replaceAllUsesWith(newVec);
       CI->eraseFromParent();
     } break;
@@ -1261,8 +1261,8 @@ void GenerateInputOutputUserCall(InputOutputAccessInfo &info, Value *undefVertex
           matElts[matIdx] = input;
         }
       }
-      Value *newVec = HLMatrixLower::BuildMatrix(EltTy, col, row, false,
-                                                 matElts, LocalBuilder);
+      Value *newVec =
+          HLMatrixLower::BuildVector(EltTy, col * row, matElts, LocalBuilder);
       CI->replaceAllUsesWith(newVec);
       CI->eraseFromParent();
     } break;
