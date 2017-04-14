@@ -1280,7 +1280,7 @@ void GenerateInputOutputUserCall(InputOutputAccessInfo &info, Value *undefVertex
         Value *colIdx = LocalBuilder.CreateAdd(idxVal, constColIdx);
 
         for (unsigned r = 0; r < row; r++) {
-          unsigned matIdx = c * row + r;
+          unsigned matIdx = HLMatrixLower::GetColMajorIdx(r, c, row);
           Value *Elt = LocalBuilder.CreateExtractElement(Val, matIdx);
           LocalBuilder.CreateCall(ldStFunc,
                                   {OpArg, ID, colIdx, columnConsts[r], Elt});
@@ -1301,7 +1301,7 @@ void GenerateInputOutputUserCall(InputOutputAccessInfo &info, Value *undefVertex
         Constant *constRowIdx = LocalBuilder.getInt32(r);
         Value *rowIdx = LocalBuilder.CreateAdd(idxVal, constRowIdx);
         for (unsigned c = 0; c < col; c++) {
-          unsigned matIdx = r * col + c;
+          unsigned matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
           Value *Elt = LocalBuilder.CreateExtractElement(Val, matIdx);
           LocalBuilder.CreateCall(ldStFunc,
                                   {OpArg, ID, rowIdx, columnConsts[c], Elt});

@@ -73,10 +73,10 @@ Type *GetMatrixInfo(Type *Ty, unsigned &col, unsigned &row) {
   DXASSERT(IsMatrixType(Ty), "not matrix type");
   StructType *ST = cast<StructType>(Ty);
   Type *EltTy = ST->getElementType(0);
-  Type *ColTy = EltTy->getArrayElementType();
-  col = EltTy->getArrayNumElements();
-  row = ColTy->getVectorNumElements();
-  return ColTy->getVectorElementType();
+  Type *RowTy = EltTy->getArrayElementType();
+  row = EltTy->getArrayNumElements();
+  col = RowTy->getVectorNumElements();
+  return RowTy->getVectorElementType();
 }
 
 bool IsMatrixArrayPointer(llvm::Type *Ty) {
@@ -102,25 +102,6 @@ Type *LowerMatrixArrayPointer(Type *Ty) {
        arraySize != arraySizeList.rend(); arraySize++)
     Ty = ArrayType::get(Ty, *arraySize);
   return PointerType::get(Ty, 0);
-}
-
-Value *BuildMatrix(Type *EltTy, unsigned col, unsigned row,
-                          bool colMajor, ArrayRef<Value *> elts,
-                          IRBuilder<> &Builder) {
-  Value *Result = UndefValue::get(VectorType::get(EltTy, col * row));
-  if (colMajor) {
-    for (unsigned i = 0; i < col * row; i++)
-      Result = Builder.CreateInsertElement(Result, elts[i], i);
-  } else {
-    for (unsigned r = 0; r < row; r++)
-      for (unsigned c = 0; c < col; c++) {
-        unsigned rowMajorIdx = r * col + c;
-        unsigned colMajorIdx = c * row + r;
-        Result =
-            Builder.CreateInsertElement(Result, elts[rowMajorIdx], colMajorIdx);
-      }
-  }
-  return Result;
 }
 
 Value *BuildVector(Type *EltTy, unsigned size, ArrayRef<llvm::Value *> elts,
@@ -307,11 +288,6 @@ char HLMatrixLowerPass::ID = 0;
 ModulePass *llvm::createHLMatrixLowerPass() { return new HLMatrixLowerPass(); }
 
 INITIALIZE_PASS(HLMatrixLowerPass, "hlmatrixlower", "HLSL High-Level Matrix Lower", false, false)
-
-// All calculation on col major.
-static unsigned GetMatIdx(unsigned r, unsigned c, unsigned rowSize) {
-  return (c * rowSize + r);
-}
 
 static Instruction *CreateTypeCast(HLCastOpcode castOp, Type *toTy, Value *src,
                                    IRBuilder<> Builder) {
@@ -888,8 +864,8 @@ void HLMatrixLowerPass::TranslateMatMatMul(CallInst *matInst,
   Value *rMat = matToVecMap[cast<Instruction>(RVal)];
 
   auto CreateOneEltMul = [&](unsigned r, unsigned lc, unsigned c) -> Value * {
-    unsigned lMatIdx = GetMatIdx(r, lc, row);
-    unsigned rMatIdx = GetMatIdx(lc, c, rRow);
+    unsigned lMatIdx = HLMatrixLower::GetRowMajorIdx(r, lc, col);
+    unsigned rMatIdx = HLMatrixLower::GetRowMajorIdx(lc, c, rCol);
     Value *lMatElt = Builder.CreateExtractElement(lMat, lMatIdx);
     Value *rMatElt = Builder.CreateExtractElement(rMat, rMatIdx);
     return isFloat ? Builder.CreateFMul(lMatElt, rMatElt)
@@ -904,8 +880,8 @@ void HLMatrixLowerPass::TranslateMatMatMul(CallInst *matInst,
 
   auto CreateOneEltMad = [&](unsigned r, unsigned lc, unsigned c,
                              Value *acc) -> Value * {
-    unsigned lMatIdx = GetMatIdx(r, lc, row);
-    unsigned rMatIdx = GetMatIdx(lc, c, rRow);
+    unsigned lMatIdx = HLMatrixLower::GetRowMajorIdx(r, lc, col);
+    unsigned rMatIdx = HLMatrixLower::GetRowMajorIdx(lc, c, rCol);
     Value *lMatElt = Builder.CreateExtractElement(lMat, lMatIdx);
     Value *rMatElt = Builder.CreateExtractElement(rMat, rMatIdx);
     return Builder.CreateCall(Mad, {madOpArg, lMatElt, rMatElt, acc});
@@ -919,7 +895,7 @@ void HLMatrixLowerPass::TranslateMatMatMul(CallInst *matInst,
       for (lc = 1; lc < col; lc++) {
         tmpVal = CreateOneEltMad(r, lc, c, tmpVal);
       }
-      unsigned matIdx = GetMatIdx(r, c, row);
+      unsigned matIdx = HLMatrixLower::GetRowMajorIdx(r, c, rCol);
       retVal = Builder.CreateInsertElement(retVal, tmpVal, matIdx);
     }
   }
@@ -957,7 +933,7 @@ void HLMatrixLowerPass::TranslateMatVecMul(CallInst *matInst,
 
   auto CreateOneEltMad = [&](unsigned r, unsigned c, Value *acc) -> Value * {
     Value *vecElt = Builder.CreateExtractElement(vec, c);
-    uint32_t matIdx = GetMatIdx(r, c, row);
+    uint32_t matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
     Value *matElt = Builder.CreateExtractElement(mat, matIdx);
     return Builder.CreateCall(Mad, {madOpArg, vecElt, matElt, acc});
   };
@@ -965,7 +941,7 @@ void HLMatrixLowerPass::TranslateMatVecMul(CallInst *matInst,
   for (unsigned r = 0; r < row; r++) {
     unsigned c = 0;
     Value *vecElt = Builder.CreateExtractElement(vec, c);
-    uint32_t matIdx = GetMatIdx(r, c, row);
+    uint32_t matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
     Value *matElt = Builder.CreateExtractElement(mat, matIdx);
 
     Value *tmpVal = isFloat ? Builder.CreateFMul(vecElt, matElt)
@@ -1009,7 +985,7 @@ void HLMatrixLowerPass::TranslateVecMatMul(CallInst *matInst,
 
   auto CreateOneEltMad = [&](unsigned r, unsigned c, Value *acc) -> Value * {
     Value *vecElt = Builder.CreateExtractElement(vec, r);
-    uint32_t matIdx = GetMatIdx(r, c, row);
+    uint32_t matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
     Value *matElt = Builder.CreateExtractElement(mat, matIdx);
     return Builder.CreateCall(Mad, {madOpArg, vecElt, matElt, acc});
   };
@@ -1017,7 +993,7 @@ void HLMatrixLowerPass::TranslateVecMatMul(CallInst *matInst,
   for (unsigned c = 0; c < col; c++) {
     unsigned r = 0;
     Value *vecElt = Builder.CreateExtractElement(vec, r);
-    uint32_t matIdx = GetMatIdx(r, c, row);
+    uint32_t matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
     Value *matElt = Builder.CreateExtractElement(mat, matIdx);
 
     Value *tmpVal = isFloat ? Builder.CreateFMul(vecElt, matElt)
@@ -1053,25 +1029,8 @@ void HLMatrixLowerPass::TranslateMul(CallInst *matInst, Instruction *vecInst,
 void HLMatrixLowerPass::TranslateMatTranspose(CallInst *matInst,
                                               Instruction *vecInst,
                                               CallInst *transposeInst) {
-  unsigned row, col;
-  GetMatrixInfo(transposeInst->getType(), col, row);
-  IRBuilder<> Builder(transposeInst);
-  std::vector<int> transposeMask(col * row);
-  unsigned idx = 0;
-  for (unsigned c = 0; c < col; c++)
-    for (unsigned r = 0; r < row; r++) {
-      // change to row major
-      unsigned matIdx = GetMatIdx(c, r, col);
-      transposeMask[idx++] = (matIdx);
-    }
-  Instruction *shuf = cast<Instruction>(
-      Builder.CreateShuffleVector(vecInst, vecInst, transposeMask));
-  // Replace vec transpose function call with shuf.
-  DXASSERT(matToVecMap.count(transposeInst), "must has vec version");
-  Instruction *vecUseInst = cast<Instruction>(matToVecMap[transposeInst]);
-  vecUseInst->replaceAllUsesWith(shuf);
-  AddToDeadInsts(vecUseInst);
-  matToVecMap[transposeInst] = shuf;
+  // Matrix value is row major, transpose is cast it to col major.
+  TranslateMatMajorCast(matInst, vecInst, transposeInst, /*bRowToCol*/ true);
 }
 
 static Value *Determinant2x2(Value *m00, Value *m01, Value *m10, Value *m11,
@@ -1250,9 +1209,9 @@ void HLMatrixLowerPass::TranslateMatMatCast(CallInst *matInst,
     // shuf first
     std::vector<int> castMask(toCol * toRow);
     unsigned idx = 0;
-    for (unsigned c = 0; c < toCol; c++)
-      for (unsigned r = 0; r < toRow; r++) {
-        unsigned matIdx = GetMatIdx(r, c, fromRow);
+    for (unsigned r = 0; r < toRow; r++)
+      for (unsigned c = 0; c < toCol; c++) {
+        unsigned matIdx = HLMatrixLower::GetRowMajorIdx(r, c, fromCol);
         castMask[idx++] = matIdx;
       }
 
@@ -1794,7 +1753,7 @@ static void IterateInitList(MutableArrayRef<Value *> elts, unsigned &idx,
     HLMatrixLower::GetMatrixInfo(valTy, col, row);
     unsigned matSize = col * row;
     val = matToVecMap[cast<Instruction>(val)];
-    // temp matrix all col major
+    // temp matrix all row major
     for (unsigned i = 0; i < matSize; i++) {
       Value *Elt = Builder.CreateExtractElement(val, i);
       elts[idx + i] = Elt;
@@ -1871,15 +1830,13 @@ void HLMatrixLowerPass::TranslateMatInit(CallInst *matInitInst) {
   }
 
   Value *newInit = UndefValue::get(vecTy);
-  // InitList is row major, the result is col major.
-  for (unsigned c = 0; c < col; c++)
-    for (unsigned r = 0; r < row; r++) {
-      unsigned rowMajorIdx = r * col + c;
-      unsigned colMajorIdx = c * row + r;
-      Constant *vecIdx = Builder.getInt32(colMajorIdx);
-      newInit = InsertElementInst::Create(newInit, elts[rowMajorIdx], vecIdx);
+  // InitList is row major, the result is row major too.
+  for (unsigned i=0;i< col * row;i++) {
+      Constant *vecIdx = Builder.getInt32(i);
+      newInit = InsertElementInst::Create(newInit, elts[i], vecIdx);
       Builder.Insert(cast<Instruction>(newInit));
-    }
+  }
+
   // Replace matInit function call with matInitInst.
   DXASSERT(matToVecMap.count(matInitInst), "must has vec version");
   Instruction *vecUseInst = cast<Instruction>(matToVecMap[matInitInst]);
@@ -2126,14 +2083,14 @@ static Constant *LowerMatrixArrayConst(Constant *MA, Type *ResultTy) {
   } else {
     // Cast float[row][col] -> float< row * col>.
     // Get float[row][col] from the struct.
-    Constant *cols = MA->getAggregateElement((unsigned)0);
-    ArrayType *ColAT = cast<ArrayType>(cols->getType());
+    Constant *rows = MA->getAggregateElement((unsigned)0);
+    ArrayType *RowAT = cast<ArrayType>(rows->getType());
     std::vector<Constant *> Elts;
-    for (unsigned c=0;c<ColAT->getArrayNumElements();c++) {
-      Constant *col = cols->getAggregateElement(c);
-      VectorType *VT = cast<VectorType>(col->getType());
-      for (unsigned r = 0; r < VT->getVectorNumElements(); r++) {
-        Elts.emplace_back(col->getAggregateElement(r));
+    for (unsigned r=0;r<RowAT->getArrayNumElements();r++) {
+      Constant *row = rows->getAggregateElement(r);
+      VectorType *VT = cast<VectorType>(row->getType());
+      for (unsigned c = 0; c < VT->getVectorNumElements(); c++) {
+        Elts.emplace_back(row->getAggregateElement(c));
       }
     }
     return ConstantVector::get(Elts);
@@ -2226,11 +2183,11 @@ static void FlattenMatConst(Constant *M, std::vector<Constant *> &Elts) {
     M = M->getAggregateElement((unsigned)0);
     // Initializer is already in correct major.
     // Just read it here.
-    // The type is vector<element, row>[col].
-    for (unsigned c = 0; c < col; c++) {
-      for (unsigned r = 0; r < row; r++) {
-        Constant *R = M->getAggregateElement(c);
-        Elts.emplace_back(R->getAggregateElement(r));
+    // The type is vector<element, col>[row].
+    for (unsigned r = 0; r < row; r++) {
+      Constant *C = M->getAggregateElement(r);
+      for (unsigned c = 0; c < col; c++) {
+        Elts.emplace_back(C->getAggregateElement(c));
       }
     }
   }

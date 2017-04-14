@@ -319,15 +319,15 @@ unsigned  GetHLOpcode(CallInst *CI) {
   return idConst->getUniqueInteger().getLimitedValue();
 }
 
-unsigned  GetRowMajorOpcode(HLOpcodeGroup group, unsigned opcode) {
+unsigned  GetColMajorOpcode(HLOpcodeGroup group, unsigned opcode) {
   switch (group) {
   case HLOpcodeGroup::HLMatLoadStore: {
     HLMatLoadStoreOpcode matOp = static_cast<HLMatLoadStoreOpcode>(opcode);
     switch (matOp) {
-    case HLMatLoadStoreOpcode::ColMatLoad:
-      return static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad);
-    case HLMatLoadStoreOpcode::ColMatStore:
-      return static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore);
+    case HLMatLoadStoreOpcode::RowMatLoad:
+      return static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad);
+    case HLMatLoadStoreOpcode::RowMatStore:
+      return static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore);
     default:
       return opcode;
     }
@@ -335,10 +335,10 @@ unsigned  GetRowMajorOpcode(HLOpcodeGroup group, unsigned opcode) {
   case HLOpcodeGroup::HLSubscript: {
     HLSubscriptOpcode subOp = static_cast<HLSubscriptOpcode>(opcode);
     switch (subOp) {
-    case HLSubscriptOpcode::ColMatElement:
-      return static_cast<unsigned>(HLSubscriptOpcode::RowMatElement);
-    case HLSubscriptOpcode::ColMatSubscript:
-      return static_cast<unsigned>(HLSubscriptOpcode::RowMatSubscript);
+    case HLSubscriptOpcode::RowMatElement:
+      return static_cast<unsigned>(HLSubscriptOpcode::ColMatElement);
+    case HLSubscriptOpcode::RowMatSubscript:
+      return static_cast<unsigned>(HLSubscriptOpcode::ColMatSubscript);
     default:
       return opcode;
     }

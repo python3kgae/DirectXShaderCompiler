@@ -4727,7 +4727,7 @@ Value *TranslateConstBufMatLdLegacy(Type *matType, Value *handle,
                                         EltTy, row, OP, Builder);
 
       for (unsigned r = 0; r < row; r++) {
-        unsigned matIdx = c * row + r;
+        unsigned matIdx = HLMatrixLower::GetColMajorIdx(r, c, row);
         elts[matIdx] = Builder.CreateExtractElement(col, r);
       }
       // Update offset for a column.
@@ -4740,7 +4740,7 @@ Value *TranslateConstBufMatLdLegacy(Type *matType, Value *handle,
       Value *row = GenerateCBLoadLegacy(handle, legacyIdx, /*channelOffset*/ 0,
                                         EltTy, col, OP, Builder);
       for (unsigned c = 0; c < col; c++) {
-        unsigned matIdx = r * col + c;
+        unsigned matIdx = HLMatrixLower::GetRowMajorIdx(r, c, col);
         elts[matIdx] = Builder.CreateExtractElement(row, c);
       }
       // Update offset for a row.

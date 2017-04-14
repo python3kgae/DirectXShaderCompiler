@@ -119,7 +119,7 @@ HLOpcodeGroup GetHLOpcodeGroupByName(const llvm::Function *F);
 llvm::StringRef GetHLOpcodeGroupNameByAttr(llvm::Function *F);
 llvm::StringRef GetHLLowerStrategy(llvm::Function *F);
 unsigned  GetHLOpcode(llvm::CallInst *CI);
-unsigned  GetRowMajorOpcode(HLOpcodeGroup group, unsigned opcode);
+unsigned  GetColMajorOpcode(HLOpcodeGroup group, unsigned opcode);
 void SetHLLowerStrategy(llvm::Function *F, llvm::StringRef S);
 
 // For intrinsic opcode.

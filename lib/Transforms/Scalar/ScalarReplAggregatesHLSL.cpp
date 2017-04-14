@@ -56,6 +56,7 @@
 #include "dxc/HLSL/DxilOperations.h"
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace hlsl;
@@ -2181,13 +2182,13 @@ static void SplitCpy(Type *Ty, Value *Dest, Value *Src,
 
     Value *Load = HLModule::EmitHLOperationCall(
         Builder, HLOpcodeGroup::HLMatLoadStore,
-        static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad), Ty, {SrcGEP},
+        static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad), Ty, {SrcGEP},
         *M);
 
     // Generate Matrix Store.
     HLModule::EmitHLOperationCall(
         Builder, HLOpcodeGroup::HLMatLoadStore,
-        static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore), Ty,
+        static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore), Ty,
         {DestGEP, Load}, *M);
 
   } else if (StructType *ST = dyn_cast<StructType>(Ty)) {
@@ -2560,7 +2561,7 @@ void SROA_Helper::RewriteForLoad(LoadInst *LI) {
           // Generate Matrix Load.
           Load = HLModule::EmitHLOperationCall(
               Builder, HLOpcodeGroup::HLMatLoadStore,
-              static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad), Ty,
+              static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad), Ty,
               {Ptr}, *M);
         }
         LdElts[i] = Load;
@@ -3498,6 +3499,8 @@ private:
   std::unordered_map<Value *, std::pair<Value*, DxilParamInputQual>> castParamMap;
   // Map form first element of a vector the list of all elements of the vector.
   std::unordered_map<Value *, SmallVector<Value*, 4> > vectorEltsMap;
+  // Set for row major matrix parameter.
+  std::unordered_set<Value *> castRowMajorParamMap;
   bool m_HasDbgInfo;
 };
 }
@@ -3765,6 +3768,10 @@ void SROA_Parameter_HLSL::allocateSemanticIndex(
   }
 }
 
+//
+// Cast parameters.
+//
+
 static void CopyHandleToResourcePtr(Value *Handle, Value *ResPtr, HLModule &HLM,
                                     IRBuilder<> &Builder) {
   // Cast it to resource.
@@ -3799,7 +3806,6 @@ static void CopyResourcePtrToHandlePtr(Value *Res, Value *HandlePtr,
   Value *Handle = CastResourcePtrToHandle(Res, HandleTy, HLM, Builder);
   Builder.CreateStore(Handle, HandlePtr);
 }
-// TODO: support arrayPtrToMatrixPtr.
 
 static void CopyVectorPtrToEltsPtr(Value *VecPtr, ArrayRef<Value *> elts,
                                    unsigned vecSize, IRBuilder<> &Builder) {
@@ -3821,36 +3827,105 @@ static void CopyEltsPtrToVectorPtr(ArrayRef<Value *> elts, Value *VecPtr,
   Builder.CreateStore(Vec, VecPtr);
 }
 
-using CopyFunctionTy = void(Value *FromPtr, Value *ToPtr, HLModule &HLM,
-                            Type *HandleTy, IRBuilder<> &Builder);
+static void CopyMatToArrayPtr(Value *Mat, Value *ArrayPtr,
+                              unsigned arrayBaseIdx, HLModule &HLM,
+                              IRBuilder<> &Builder, bool bRowMajor) {
+  Type *Ty = Mat->getType();
+  // Mat val is row major.
+  unsigned col, row;
+  HLMatrixLower::GetMatrixInfo(Mat->getType(), col, row);
+  Type *VecTy = HLMatrixLower::LowerMatrixType(Ty);
+  Value *Vec =
+      HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLCast,
+                              (unsigned)HLCastOpcode::RowMatrixToVecCast, VecTy,
+                              {Mat}, *HLM.GetModule());
+  Value *zero = Builder.getInt32(0);
 
-static void CastCopyArray(Value *FromArray, Value *ToArray, Type *CurFromTy,
-                          Type *CurToTy, std::vector<Value *> &idxList,
-                          Type *HandleTy, HLModule &HLM, IRBuilder<> &Builder,
-                          CopyFunctionTy CastCopyFn) {
-  if (!CurFromTy->isArrayTy() || !CurToTy->isArrayTy()) {
-    Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
-    Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
-    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
-  } else {
-    unsigned size = CurFromTy->getArrayNumElements();
-    Type *FromEltTy = CurFromTy->getArrayElementType();
-    Type *ToEltTy = CurToTy->getArrayElementType();
-    for (unsigned i = 0; i < size; i++) {
-      idxList.push_back(Builder.getInt32(i));
-      CastCopyArray(FromArray, ToArray, FromEltTy, ToEltTy, idxList, HandleTy,
-                    HLM, Builder, CastCopyFn);
-      idxList.pop_back();
+  for (unsigned r = 0; r < row; r++)
+    for (unsigned c = 0; c < col; c++) {
+      unsigned rowMatIdx = HLMatrixLower::GetColMajorIdx(r, c, row);
+      Value *Elt = Builder.CreateExtractElement(Vec, rowMatIdx);
+      unsigned matIdx =
+          bRowMajor ? rowMatIdx :  HLMatrixLower::GetColMajorIdx(r, c, row);
+      Value *Ptr = Builder.CreateInBoundsGEP(
+          ArrayPtr, {zero, Builder.getInt32(arrayBaseIdx + matIdx)});
+      Builder.CreateStore(Elt, Ptr);
     }
+}
+static void CopyMatPtrToArrayPtr(Value *MatPtr, Value *ArrayPtr,
+                                 unsigned arrayBaseIdx, HLModule &HLM,
+                                 IRBuilder<> &Builder, bool bRowMajor) {
+  Type *Ty = MatPtr->getType()->getPointerElementType();
+  Value *Mat = nullptr;
+  if (bRowMajor) {
+    Mat = HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLMatLoadStore,
+                                  (unsigned)HLMatLoadStoreOpcode::RowMatLoad,
+                                  Ty, {MatPtr}, *HLM.GetModule());
+  } else {
+    Mat = HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLMatLoadStore,
+                                  (unsigned)HLMatLoadStoreOpcode::ColMatLoad,
+                                  Ty, {MatPtr}, *HLM.GetModule());
+    // Matrix value should be row major.
+    Mat = HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLCast,
+                                  (unsigned)HLCastOpcode::ColMatrixToRowMatrix,
+                                  Ty, {Mat}, *HLM.GetModule());
+  }
+  CopyMatToArrayPtr(Mat, ArrayPtr, arrayBaseIdx, HLM, Builder, bRowMajor);
+}
+
+static Value *LoadArrayPtrToMat(Value *ArrayPtr, unsigned arrayBaseIdx,
+                                Type *Ty, HLModule &HLM, IRBuilder<> &Builder,
+                                bool bRowMajor) {
+  unsigned col, row;
+  HLMatrixLower::GetMatrixInfo(Ty, col, row);
+  // HLInit operands are in row major.
+  SmallVector<Value *, 16> Elts;
+  Value *zero = Builder.getInt32(0);
+  for (unsigned r = 0; r < row; r++)
+    for (unsigned c = 0; c < col; c++) {
+      unsigned matIdx = bRowMajor ? HLMatrixLower::GetRowMajorIdx(r, c, col)
+                                  : HLMatrixLower::GetColMajorIdx(r, c, row);
+      Value *Ptr = Builder.CreateInBoundsGEP(
+          ArrayPtr, {zero, Builder.getInt32(arrayBaseIdx + matIdx)});
+      Value *Elt = Builder.CreateLoad(Ptr);
+      Elts.emplace_back(Elt);
+    }
+
+  return HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLInit,
+                                 /*opcode*/ 0, Ty, {Elts}, *HLM.GetModule());
+}
+
+static void CopyArrayPtrToMatPtr(Value *ArrayPtr, unsigned arrayBaseIdx,
+                                 Value *MatPtr, HLModule &HLM,
+                                 IRBuilder<> &Builder, bool bRowMajor) {
+  Type *Ty = MatPtr->getType()->getPointerElementType();
+  Value *Mat =
+      LoadArrayPtrToMat(ArrayPtr, arrayBaseIdx, Ty, HLM, Builder, bRowMajor);
+  if (bRowMajor) {
+    HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLMatLoadStore,
+                            (unsigned)HLMatLoadStoreOpcode::RowMatStore, Ty,
+                            {MatPtr, Mat}, *HLM.GetModule());
+  } else {
+    // Mat is row major.
+    // Cast it to col major before store.
+    Mat = HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLCast,
+                                  (unsigned)HLCastOpcode::RowMatrixToColMatrix,
+                                  Ty, {Mat}, *HLM.GetModule());
+    HLM.EmitHLOperationCall(Builder, HLOpcodeGroup::HLMatLoadStore,
+                            (unsigned)HLMatLoadStoreOpcode::ColMatStore, Ty,
+                            {MatPtr, Mat}, *HLM.GetModule());
   }
 }
 
-static void CastCopyArrayMultiDimTo1Dim(Value *FromArray, Value *ToArray,
-                                        Type *CurFromTy,
-                                        std::vector<Value *> &idxList,
-                                        unsigned calcIdx, Type *HandleTy,
-                                        HLModule &HLM, IRBuilder<> &Builder,
-                                        CopyFunctionTy CastCopyFn) {
+using CopyFunctionTy = void(Value *FromPtr, Value *ToPtr, HLModule &HLM,
+                            Type *HandleTy, IRBuilder<> &Builder,
+                            bool bRowMajor);
+
+static void
+CastCopyArrayMultiDimTo1Dim(Value *FromArray, Value *ToArray, Type *CurFromTy,
+                            std::vector<Value *> &idxList, unsigned calcIdx,
+                            Type *HandleTy, HLModule &HLM, IRBuilder<> &Builder,
+                            CopyFunctionTy CastCopyFn, bool bRowMajor) {
   if (CurFromTy->isVectorTy()) {
     // Copy vector to array.
     Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
@@ -3863,11 +3938,19 @@ static void CastCopyArrayMultiDimTo1Dim(Value *FromArray, Value *ToArray,
       Value *Elt = Builder.CreateExtractElement(V, i);
       Builder.CreateStore(Elt, ToPtr);
     }
+  } else if (HLMatrixLower::IsMatrixType(CurFromTy)) {
+    // Copy matrix to array.
+    unsigned col, row;
+    HLMatrixLower::GetMatrixInfo(CurFromTy, col, row);
+    // Calculate the offset.
+    unsigned offset = calcIdx * col * row;
+    Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
+    CopyMatPtrToArrayPtr(FromPtr, ToArray, offset, HLM, Builder, bRowMajor);
   } else if (!CurFromTy->isArrayTy()) {
     Value *FromPtr = Builder.CreateInBoundsGEP(FromArray, idxList);
     Value *ToPtr = Builder.CreateInBoundsGEP(
         ToArray, {Builder.getInt32(0), Builder.getInt32(calcIdx)});
-    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
+    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder, bRowMajor);
   } else {
     unsigned size = CurFromTy->getArrayNumElements();
     Type *FromEltTy = CurFromTy->getArrayElementType();
@@ -3875,36 +3958,46 @@ static void CastCopyArrayMultiDimTo1Dim(Value *FromArray, Value *ToArray,
       idxList.push_back(Builder.getInt32(i));
       unsigned idx = calcIdx * size + i;
       CastCopyArrayMultiDimTo1Dim(FromArray, ToArray, FromEltTy, idxList, idx,
-                                  HandleTy, HLM, Builder, CastCopyFn);
+                                  HandleTy, HLM, Builder, CastCopyFn,
+                                  bRowMajor);
       idxList.pop_back();
     }
   }
 }
 
-static void CastCopyArray1DimToMultiDim(Value *FromArray, Value *ToArray,
-                                        Type *CurToTy,
-                                        std::vector<Value *> &idxList,
-                                        unsigned calcIdx, Type *HandleTy,
-                                        HLModule &HLM, IRBuilder<> &Builder,
-                                        CopyFunctionTy CastCopyFn) {
+static void
+CastCopyArray1DimToMultiDim(Value *FromArray, Value *ToArray, Type *CurToTy,
+                            std::vector<Value *> &idxList, unsigned calcIdx,
+                            Type *HandleTy, HLModule &HLM, IRBuilder<> &Builder,
+                            CopyFunctionTy CastCopyFn, bool bRowMajor) {
   if (CurToTy->isVectorTy()) {
     // Copy array to vector.
     Value *V = UndefValue::get(CurToTy);
     unsigned vecSize = CurToTy->getVectorNumElements();
+    // Calculate the offset.
+    unsigned offset = calcIdx * vecSize;
     Value *zeroIdx = Builder.getInt32(0);
     Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
     for (unsigned i = 0; i < vecSize; i++) {
       Value *FromPtr = Builder.CreateInBoundsGEP(
-          FromArray, {zeroIdx, Builder.getInt32(calcIdx++)});
+          FromArray, {zeroIdx, Builder.getInt32(offset++)});
       Value *Elt = Builder.CreateLoad(FromPtr);
       V = Builder.CreateInsertElement(V, Elt, i);
     }
     Builder.CreateStore(V, ToPtr);
+  } else if (HLMatrixLower::IsMatrixType(CurToTy)) {
+    // Copy array to matrix.
+    unsigned col, row;
+    HLMatrixLower::GetMatrixInfo(CurToTy, col, row);
+    // Calculate the offset.
+    unsigned offset = calcIdx * col * row;
+    Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
+    CopyArrayPtrToMatPtr(FromArray, offset, ToPtr, HLM, Builder, bRowMajor);
   } else if (!CurToTy->isArrayTy()) {
     Value *FromPtr = Builder.CreateInBoundsGEP(
         FromArray, {Builder.getInt32(0), Builder.getInt32(calcIdx)});
     Value *ToPtr = Builder.CreateInBoundsGEP(ToArray, idxList);
-    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder);
+    CastCopyFn(FromPtr, ToPtr, HLM, HandleTy, Builder, bRowMajor);
   } else {
     unsigned size = CurToTy->getArrayNumElements();
     Type *ToEltTy = CurToTy->getArrayElementType();
@@ -3912,14 +4005,16 @@ static void CastCopyArray1DimToMultiDim(Value *FromArray, Value *ToArray,
       idxList.push_back(Builder.getInt32(i));
       unsigned idx = calcIdx * size + i;
       CastCopyArray1DimToMultiDim(FromArray, ToArray, ToEltTy, idxList, idx,
-                                  HandleTy, HLM, Builder, CastCopyFn);
+                                  HandleTy, HLM, Builder, CastCopyFn,
+                                  bRowMajor);
       idxList.pop_back();
     }
   }
 }
 
 static void CastCopyOldPtrToNewPtr(Value *OldPtr, Value *NewPtr, HLModule &HLM,
-                                   Type *HandleTy, IRBuilder<> &Builder) {
+                                   Type *HandleTy, IRBuilder<> &Builder,
+                                   bool bRowMajor) {
   Type *NewTy = NewPtr->getType()->getPointerElementType();
   Type *OldTy = OldPtr->getType()->getPointerElementType();
   if (NewTy == HandleTy) {
@@ -3934,16 +4029,21 @@ static void CastCopyOldPtrToNewPtr(Value *OldPtr, Value *NewPtr, HLModule &HLM,
       Value *Elt = Builder.CreateExtractElement(V, i);
       Builder.CreateStore(Elt, EltPtr);
     }
+  } else if (HLMatrixLower::IsMatrixType(OldTy)) {
+    CopyMatPtrToArrayPtr(OldPtr, NewPtr, /*arrayBaseIdx*/ 0, HLM, Builder,
+                         bRowMajor);
   } else if (OldTy->isArrayTy()) {
     std::vector<Value *> idxList;
     idxList.emplace_back(Builder.getInt32(0));
-    CastCopyArrayMultiDimTo1Dim(OldPtr, NewPtr, OldTy, idxList, /*calcIdx*/0, HandleTy, HLM, Builder,
-                  CastCopyOldPtrToNewPtr);
+    CastCopyArrayMultiDimTo1Dim(OldPtr, NewPtr, OldTy, idxList, /*calcIdx*/ 0,
+                                HandleTy, HLM, Builder, CastCopyOldPtrToNewPtr,
+                                bRowMajor);
   }
 }
 
 static void CastCopyNewPtrToOldPtr(Value *NewPtr, Value *OldPtr, HLModule &HLM,
-                                   Type *HandleTy, IRBuilder<> &Builder) {
+                                   Type *HandleTy, IRBuilder<> &Builder,
+                                   bool bRowMajor) {
   Type *NewTy = NewPtr->getType()->getPointerElementType();
   Type *OldTy = OldPtr->getType()->getPointerElementType();
   if (NewTy == HandleTy) {
@@ -3959,11 +4059,15 @@ static void CastCopyNewPtrToOldPtr(Value *NewPtr, Value *OldPtr, HLModule &HLM,
       V = Builder.CreateInsertElement(V, Elt, i);
     }
     Builder.CreateStore(V, OldPtr);
+  } else if (HLMatrixLower::IsMatrixType(OldTy)) {
+    CopyArrayPtrToMatPtr(NewPtr, /*arrayBaseIdx*/ 0, OldPtr, HLM, Builder,
+                         bRowMajor);
   } else if (OldTy->isArrayTy()) {
     std::vector<Value *> idxList;
     idxList.emplace_back(Builder.getInt32(0));
-    CastCopyArray1DimToMultiDim(NewPtr, OldPtr, OldTy, idxList, /*calcIdx*/0, HandleTy, HLM, Builder,
-                  CastCopyNewPtrToOldPtr);
+    CastCopyArray1DimToMultiDim(NewPtr, OldPtr, OldTy, idxList, /*calcIdx*/ 0,
+                                HandleTy, HLM, Builder, CastCopyNewPtrToOldPtr,
+                                bRowMajor);
   }
 }
 
@@ -4023,17 +4127,22 @@ void SROA_Parameter_HLSL::replaceCastArgument(Value *&NewArg, Value *OldArg,
     // Must be in param.
     // Load OldArg as NewArg before call.
     NewArg = CallBuilder.CreateLoad(OldArg);
+  } else if (HLMatrixLower::IsMatrixType(OldTy)) {
+    bool bRowMajor = castRowMajorParamMap.count(NewArg);
+    CopyMatToArrayPtr(OldArg, NewArg, /*arrayBaseIdx*/ 0, *m_pHLModule,
+                      CallBuilder, bRowMajor);
   } else {
+    bool bRowMajor = castRowMajorParamMap.count(NewArg);
     // NewTy is pointer type.
     // Copy OldArg to NewArg before Call.
     if (bIn) {
       CastCopyOldPtrToNewPtr(OldArg, NewArg, *m_pHLModule, HandleTy,
-                             CallBuilder);
+                             CallBuilder, bRowMajor);
     }
     if (bOut) {
       // Store NewArg to OldArg after Call.
-      CastCopyNewPtrToOldPtr(NewArg, OldArg, *m_pHLModule, HandleTy,
-                             RetBuilder);
+      CastCopyNewPtrToOldPtr(NewArg, OldArg, *m_pHLModule, HandleTy, RetBuilder,
+                             bRowMajor);
     }
   }
 }
@@ -4065,7 +4174,6 @@ void SROA_Parameter_HLSL::replaceCastParameter(
     DIB.insertDeclare(NewParam, DDI->getVariable(), DDIExp, DDI->getDebugLoc(),
                       Builder.GetInsertPoint());
   }
-
 
   if (isa<Argument>(OldParam) && OldTy->isPointerTy()) {
     // OldParam will be removed with Old function.
@@ -4123,12 +4231,18 @@ void SROA_Parameter_HLSL::replaceCastParameter(
     // Must be in param.
     // Store NewParam to OldParam at entry.
     Builder.CreateStore(NewParam, OldParam);
+  } else if (HLMatrixLower::IsMatrixType(OldTy)) {
+    bool bRowMajor = castRowMajorParamMap.count(NewParam);
+    Value *Mat = LoadArrayPtrToMat(NewParam, /*arrayBaseIdx*/ 0, OldTy,
+                                   *m_pHLModule, Builder, bRowMajor);
+    OldParam->replaceAllUsesWith(Mat);
   } else {
+    bool bRowMajor = castRowMajorParamMap.count(NewParam);
     // NewTy is pointer type.
     if (bIn) {
       // Copy NewParam to OldParam at entry.
       CastCopyNewPtrToOldPtr(NewParam, OldParam, *m_pHLModule, HandleTy,
-                             Builder);
+                             Builder, bRowMajor);
     }
     if (bOut) {
       // Store the OldParam to NewParam before every return.
@@ -4136,7 +4250,7 @@ void SROA_Parameter_HLSL::replaceCastParameter(
         if (ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
           IRBuilder<> RetBuilder(RI);
           CastCopyOldPtrToNewPtr(OldParam, NewParam, *m_pHLModule, HandleTy,
-                                 RetBuilder);
+                                 RetBuilder, bRowMajor);
         }
       }
     }
@@ -4433,6 +4547,21 @@ void SROA_Parameter_HLSL::flattenArgument(
             OldV = castParamMap[OldV].first;
           }
           castParamMap[V] = std::make_pair(OldV, inputQual);
+        } else if (HLMatrixLower::IsMatrixType(Ty)) {
+          unsigned col, row;
+          Type *EltTy = HLMatrixLower::GetMatrixInfo(Ty, col, row);
+          Value *Mat = V;
+          // Cast matrix to array.
+          Type *AT = ArrayType::get(EltTy, col * row);
+          V = Builder.CreateAlloca(AT);
+          castParamMap[V] = std::make_pair(Mat, inputQual);
+
+          DXASSERT(annotation.HasMatrixAnnotation(),
+                   "need matrix annotation here");
+          if (annotation.GetMatrixAnnotation().Orientation ==
+              hlsl::MatrixOrientation::RowMajor) {
+            castRowMajorParamMap.insert(V);
+          }
         } else if (Ty->isArrayTy()) {
           unsigned arraySize = 1;
           Type *AT = Ty;
@@ -4442,19 +4571,91 @@ void SROA_Parameter_HLSL::flattenArgument(
             arraySize *= AT->getArrayNumElements();
             AT = AT->getArrayElementType();
           }
-          // TODO: cast matrix array.
+
           if (VectorType *VT = dyn_cast<VectorType>(AT)) {
             Value *VecArray = V;
             Type *AT = ArrayType::get(VT->getElementType(),
                                       arraySize * VT->getNumElements());
             V = Builder.CreateAlloca(AT);
             castParamMap[V] = std::make_pair(VecArray, inputQual);
+          } else if (HLMatrixLower::IsMatrixType(AT)) {
+            unsigned col, row;
+            Type *EltTy = HLMatrixLower::GetMatrixInfo(AT, col, row);
+            Value *MatArray = V;
+            Type *AT = ArrayType::get(EltTy, arraySize * col * row);
+            V = Builder.CreateAlloca(AT);
+            castParamMap[V] = std::make_pair(MatArray, inputQual);
+            DXASSERT(annotation.HasMatrixAnnotation(),
+                     "need matrix annotation here");
+            if (annotation.GetMatrixAnnotation().Orientation ==
+                hlsl::MatrixOrientation::RowMajor) {
+              castRowMajorParamMap.insert(V);
+            }
           } else if (dim > 1) {
             // Flatten multi-dim array to 1dim.
             Value *MultiArray = V;
             V = Builder.CreateAlloca(
                 ArrayType::get(VT->getElementType(), arraySize));
             castParamMap[V] = std::make_pair(MultiArray, inputQual);
+          }
+        }
+      } else {
+        // Entry function matrix value parameter has major.
+        // Make sure its user use row major matrix value.
+        bool updateToColMajor = annotation.HasMatrixAnnotation() &&
+                                annotation.GetMatrixAnnotation().Orientation ==
+                                    MatrixOrientation::ColumnMajor;
+        if (updateToColMajor) {
+          if (V->getType()->isPointerTy()) {
+            for (User *user : V->users()) {
+              CallInst *CI = dyn_cast<CallInst>(user);
+              if (!CI)
+                continue;
+
+              HLOpcodeGroup group =
+                  GetHLOpcodeGroupByName(CI->getCalledFunction());
+              if (group != HLOpcodeGroup::HLMatLoadStore)
+                continue;
+              HLMatLoadStoreOpcode opcode =
+                  static_cast<HLMatLoadStoreOpcode>(GetHLOpcode(CI));
+              switch (opcode) {
+              case HLMatLoadStoreOpcode::RowMatLoad: {
+                // Update matrix function opcode to col major version.
+                Value *rowOpArg = ConstantInt::get(
+                    opcodeTy,
+                    static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad));
+                CI->setOperand(HLOperandIndex::kOpcodeIdx, rowOpArg);
+                // Cast it to row major.
+                CallInst *RowMat = HLModule::EmitHLOperationCall(
+                    Builder, HLOpcodeGroup::HLCast,
+                    (unsigned)HLCastOpcode::ColMatrixToRowMatrix, Ty, {CI}, M);
+                CI->replaceAllUsesWith(RowMat);
+                // Set arg to CI again.
+                RowMat->setArgOperand(HLOperandIndex::kUnaryOpSrc0Idx, CI);
+              } break;
+              case HLMatLoadStoreOpcode::RowMatStore:
+                // Update matrix function opcode to col major version.
+                Value *rowOpArg = ConstantInt::get(
+                    opcodeTy,
+                    static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore));
+                CI->setOperand(HLOperandIndex::kOpcodeIdx, rowOpArg);
+                Value *Mat =
+                    CI->getArgOperand(HLOperandIndex::kMatStoreValOpIdx);
+                // Cast it to col major.
+                CallInst *RowMat = HLModule::EmitHLOperationCall(
+                    Builder, HLOpcodeGroup::HLCast,
+                    (unsigned)HLCastOpcode::RowMatrixToColMatrix, Ty, {Mat}, M);
+                CI->setArgOperand(HLOperandIndex::kMatStoreValOpIdx, RowMat);
+                break;
+              }
+            }
+          } else {
+            CallInst *RowMat = HLModule::EmitHLOperationCall(
+                Builder, HLOpcodeGroup::HLCast,
+                (unsigned)HLCastOpcode::ColMatrixToRowMatrix, Ty, {V}, M);
+            V->replaceAllUsesWith(RowMat);
+            // Set arg to V again.
+            RowMat->setArgOperand(HLOperandIndex::kUnaryOpSrc0Idx, V);
           }
         }
       }
@@ -4472,30 +4673,6 @@ void SROA_Parameter_HLSL::flattenArgument(
       flatParamAnnotation.SetCompType(annotation.GetCompType().GetKind());
       flatParamAnnotation.SetMatrixAnnotation(annotation.GetMatrixAnnotation());
       flatParamAnnotation.SetPrecise(annotation.IsPrecise());
-
-      bool updateToRowMajor = annotation.HasMatrixAnnotation() &&
-                              hasShaderInputOutput &&
-                              annotation.GetMatrixAnnotation().Orientation ==
-                                  MatrixOrientation::RowMajor;
-
-      if (updateToRowMajor) {
-        for (User *user : V->users()) {
-          CallInst *CI = dyn_cast<CallInst>(user);
-          if (!CI)
-            continue;
-
-          HLOpcodeGroup group = GetHLOpcodeGroupByName(CI->getCalledFunction());
-          if (group == HLOpcodeGroup::NotHL)
-            continue;
-          unsigned opcode = GetHLOpcode(CI);
-          unsigned rowOpcode = GetRowMajorOpcode(group, opcode);
-          if (opcode == rowOpcode)
-            continue;
-          // Update matrix function opcode to row major version.
-          Value *rowOpArg = ConstantInt::get(opcodeTy, rowOpcode);
-          CI->setOperand(HLOperandIndex::kOpcodeIdx, rowOpArg);
-        }
-      }
 
       // Add debug info.
       if (DDI && V != Arg) {
@@ -4691,18 +4868,18 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
     DxilParameterAnnotation &paramAnnotation = EntryAnnotation->GetParameterAnnotation(arg.getArgNo());
     DxilParamInputQual qual = paramAnnotation.GetParamInputQual();
 
-    bool isRowMajor = false;
+    bool isColMajor = false;
 
     // Skip arg which is not a pointer.
     if (!Ty->isPointerTy()) {
       if (HLMatrixLower::IsMatrixType(Ty)) {
         // Replace matrix arg with cast to vec. It will be lowered in
         // DxilGenerationPass.
-        isRowMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
-                     MatrixOrientation::RowMajor;
+        isColMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
+                     MatrixOrientation::ColumnMajor;
         IRBuilder<> Builder(EntryBlk.getFirstInsertionPt());
 
-        HLCastOpcode opcode = isRowMajor ? HLCastOpcode::RowMatrixToVecCast
+        HLCastOpcode opcode = !isColMajor ? HLCastOpcode::RowMatrixToVecCast
                                          : HLCastOpcode::ColMatrixToVecCast;
         Value *undefVal = UndefValue::get(Ty);
 
@@ -4754,8 +4931,8 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
     }
 
     if (HLMatrixLower::IsMatrixType(Ty)) {
-      isRowMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
-                   MatrixOrientation::RowMajor;
+      isColMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
+                   MatrixOrientation::ColumnMajor;
       bNeedTemp = true;
       if (qual == DxilParamInputQual::In)
         bStoreInputToTemp = bLoad;
@@ -4779,7 +4956,7 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
         llvm::SmallVector<llvm::Value *, 16> idxList;
         // split copy.
         SplitCpy(temp->getType(), temp, &arg, idxList, /*bAllowReplace*/ false, Builder);
-        if (isRowMajor) {
+        if (isColMajor) {
           auto Iter = Builder.GetInsertPoint();
           Iter--;
           while (cast<Instruction>(Iter) != temp) {
@@ -4790,16 +4967,15 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
                 HLMatLoadStoreOpcode opcode =
                     static_cast<HLMatLoadStoreOpcode>(GetHLOpcode(CI));
                 switch (opcode) {
-                case HLMatLoadStoreOpcode::ColMatLoad: {
+                case HLMatLoadStoreOpcode::RowMatLoad: {
                   CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
                                     Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::RowMatLoad)));
+                                        HLMatLoadStoreOpcode::ColMatLoad)));
                 } break;
-                case HLMatLoadStoreOpcode::ColMatStore:
                 case HLMatLoadStoreOpcode::RowMatStore:
                   CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
                                     Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::RowMatStore)));
+                                        HLMatLoadStoreOpcode::ColMatStore)));
                   break;
                 }
               }
@@ -4827,10 +5003,10 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
         DxilParameterAnnotation &paramAnnotation =
             EntryAnnotation->GetParameterAnnotation(output->getArgNo());
         bool hasMatrix = paramAnnotation.HasMatrixAnnotation();
-        bool isRowMajor = false;
+        bool isColMajor = false;
         if (hasMatrix) {
-          isRowMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
-                       MatrixOrientation::RowMajor;
+          isColMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
+                       MatrixOrientation::ColumnMajor;
         }
 
         auto Iter = Builder.GetInsertPoint();
@@ -4842,7 +5018,7 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
         // split copy.
         SplitCpy(output->getType(), output, temp, idxList,
                  /*bAllowReplace*/ false, Builder);
-        if (isRowMajor) {
+        if (isColMajor) {
           if (onlyRetBlk)
             Iter = BB.begin();
 
@@ -4854,16 +5030,15 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
                 HLMatLoadStoreOpcode opcode =
                     static_cast<HLMatLoadStoreOpcode>(GetHLOpcode(CI));
                 switch (opcode) {
-                case HLMatLoadStoreOpcode::ColMatLoad: {
+                case HLMatLoadStoreOpcode::RowMatLoad: {
                   CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
                                     Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::RowMatLoad)));
+                                        HLMatLoadStoreOpcode::ColMatLoad)));
                 } break;
-                case HLMatLoadStoreOpcode::ColMatStore:
                 case HLMatLoadStoreOpcode::RowMatStore:
                   CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
                                     Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::RowMatStore)));
+                                        HLMatLoadStoreOpcode::ColMatStore)));
                   break;
                 }
               }
@@ -5193,6 +5368,30 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
               FlatRetAnnotationList.back();
           flatParamAnnotation = paramAnnotation;
         }
+      } else if (HLMatrixLower::IsMatrixType(Ty)) {
+        unsigned col, row;
+        Type *EltTy = HLMatrixLower::GetMatrixInfo(Ty, col, row);
+        Value *Mat = arg;
+        // Cast matrix to array.
+        Type *AT = ArrayType::get(EltTy, col * row);
+        arg = AllocaBuilder.CreateAlloca(AT);
+        DxilParamInputQual inputQual = paramAnnotation.GetParamInputQual();
+        castParamMap[arg] = std::make_pair(Mat, inputQual);
+
+        DXASSERT(paramAnnotation.HasMatrixAnnotation(),
+                 "need matrix annotation here");
+        if (paramAnnotation.GetMatrixAnnotation().Orientation ==
+            hlsl::MatrixOrientation::RowMajor) {
+          castRowMajorParamMap.insert(arg);
+        }
+
+        // Cannot SROA, save it to final parameter list.
+        FlatParamList.emplace_back(arg);
+        // Create ParamAnnotation for V.
+        FlatRetAnnotationList.emplace_back(DxilParameterAnnotation());
+        DxilParameterAnnotation &flatParamAnnotation =
+            FlatRetAnnotationList.back();
+        flatParamAnnotation = paramAnnotation;
       } else {
         // Cannot SROA, save it to final parameter list.
         FlatParamList.emplace_back(arg);
