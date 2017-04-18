@@ -2298,6 +2298,14 @@ void HLMatrixLowerPass::runOnFunction(Function &F) {
         } else if (HLMatrixLower::IsMatrixArrayPointer(AI->getType())) {
           lowerToVec(&I);
         }
+      } else if (CallInst *CI = dyn_cast<CallInst>(&I)) {
+        HLOpcodeGroup group =
+            hlsl::GetHLOpcodeGroupByName(CI->getCalledFunction());
+        if (group == HLOpcodeGroup::HLMatLoadStore) {
+          // Must be matStore.
+          // Lower it here to make sure it is ready before replace.
+          lowerToVec(&I);
+        }
       }
     }
   }

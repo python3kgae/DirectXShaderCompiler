@@ -124,7 +124,7 @@ struct SROA_HLSL : public FunctionPass {
 
   bool runOnFunction(Function &F) override;
 
-  bool performScalarRepl(Function &F);
+  bool performScalarRepl(Function &F, DxilTypeSystem &typeSys);
   bool performPromotion(Function &F);
   bool markPrecise(Function &F);
 
@@ -250,8 +250,10 @@ public:
 // Simple struct to split memcpy into ld/st
 struct MemcpySplitter {
   llvm::LLVMContext &m_context;
+  DxilTypeSystem &m_typeSys;
 public:
-  MemcpySplitter(llvm::LLVMContext &context) : m_context(context) {}
+  MemcpySplitter(llvm::LLVMContext &context, DxilTypeSystem &typeSys)
+      : m_context(context), m_typeSys(typeSys) {}
   void Split(llvm::Function &F);
 };
 
@@ -1049,11 +1051,15 @@ Value *ConvertToScalarInfo::ConvertScalar_InsertValue(Value *SV, Value *Old,
 //===----------------------------------------------------------------------===//
 
 bool SROA_HLSL::runOnFunction(Function &F) {
+  Module *M = F.getParent();
+  HLModule &HLM = M->GetOrCreateHLModule();
+  DxilTypeSystem &typeSys = HLM.GetTypeSystem();
+
   // change memcpy into ld/st first
-  MemcpySplitter splitter(F.getContext());
+  MemcpySplitter splitter(F.getContext(), typeSys);
   splitter.Split(F);
 
-  bool Changed = performScalarRepl(F);
+  bool Changed = performScalarRepl(F, typeSys);
   Changed |= markPrecise(F);
   Changed |= performPromotion(F);
 
@@ -1504,12 +1510,9 @@ bool SROA_HLSL::ShouldAttemptScalarRepl(AllocaInst *AI) {
 // which runs on all of the alloca instructions in the entry block, removing
 // them if they are only used by getelementptr instructions.
 //
-bool SROA_HLSL::performScalarRepl(Function &F) {
+bool SROA_HLSL::performScalarRepl(Function &F, DxilTypeSystem &typeSys) {
   std::vector<AllocaInst *> AllocaList;
   const DataLayout &DL = F.getParent()->getDataLayout();
-  Module *M = F.getParent();
-  HLModule &HM = M->GetOrCreateHLModule();
-  DxilTypeSystem &typeSys = HM.GetTypeSystem();
 
   // Scan the entry basic block, adding allocas to the worklist.
   BasicBlock &BB = F.getEntryBlock();
@@ -2164,47 +2167,66 @@ static void SimpleCopy(Value *Dest, Value *Src,
 }
 // Split copy into ld/st.
 static void SplitCpy(Type *Ty, Value *Dest, Value *Src,
-                     SmallVector<Value *, 16> &idxList,
-                     bool bAllowReplace,
-                     IRBuilder<> &Builder) {
+                     SmallVector<Value *, 16> &idxList, bool bAllowReplace,
+                     IRBuilder<> &Builder, DxilTypeSystem &typeSys,
+                     DxilFieldAnnotation *fieldAnnotation) {
   if (PointerType *PT = dyn_cast<PointerType>(Ty)) {
     Constant *idx = Constant::getIntegerValue(
         IntegerType::get(Ty->getContext(), 32), APInt(32, 0));
     idxList.emplace_back(idx);
 
-    SplitCpy(PT->getElementType(), Dest, Src, idxList, bAllowReplace, Builder);
+    SplitCpy(PT->getElementType(), Dest, Src, idxList, bAllowReplace, Builder,
+             typeSys, fieldAnnotation);
 
     idxList.pop_back();
   } else if (HLMatrixLower::IsMatrixType(Ty)) {
+    DXASSERT(fieldAnnotation, "require fieldAnnotation here");
+    DXASSERT(fieldAnnotation->HasMatrixAnnotation(), "must has matrix annotation");
     Module *M = Builder.GetInsertPoint()->getModule();
     Value *DestGEP = Builder.CreateInBoundsGEP(Dest, idxList);
     Value *SrcGEP = Builder.CreateInBoundsGEP(Src, idxList);
+    bool bRowMajor = fieldAnnotation->GetMatrixAnnotation().Orientation ==
+        MatrixOrientation::RowMajor;
+    if (bRowMajor) {
+      Value *Load = HLModule::EmitHLOperationCall(
+          Builder, HLOpcodeGroup::HLMatLoadStore,
+          static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad), Ty, {SrcGEP},
+          *M);
 
-    Value *Load = HLModule::EmitHLOperationCall(
-        Builder, HLOpcodeGroup::HLMatLoadStore,
-        static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatLoad), Ty, {SrcGEP},
-        *M);
+      // Generate Matrix Store.
+      HLModule::EmitHLOperationCall(
+          Builder, HLOpcodeGroup::HLMatLoadStore,
+          static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore), Ty,
+          {DestGEP, Load}, *M);
+    } else {
+      Value *Load = HLModule::EmitHLOperationCall(
+          Builder, HLOpcodeGroup::HLMatLoadStore,
+          static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatLoad), Ty, {SrcGEP},
+          *M);
 
-    // Generate Matrix Store.
-    HLModule::EmitHLOperationCall(
-        Builder, HLOpcodeGroup::HLMatLoadStore,
-        static_cast<unsigned>(HLMatLoadStoreOpcode::RowMatStore), Ty,
-        {DestGEP, Load}, *M);
-
+      // Generate Matrix Store.
+      HLModule::EmitHLOperationCall(
+          Builder, HLOpcodeGroup::HLMatLoadStore,
+          static_cast<unsigned>(HLMatLoadStoreOpcode::ColMatStore), Ty,
+          {DestGEP, Load}, *M);
+    }
   } else if (StructType *ST = dyn_cast<StructType>(Ty)) {
     if (HLModule::IsHLSLObjectType(ST)) {
       // Avoid split HLSL object.
       SimpleCopy(Dest, Src, idxList, bAllowReplace, Builder);
       return;
     }
+    DxilStructAnnotation *STA = typeSys.GetStructAnnotation(ST);
+    DXASSERT(STA, "require annotation here");
     for (uint32_t i = 0; i < ST->getNumElements(); i++) {
       llvm::Type *ET = ST->getElementType(i);
 
       Constant *idx = llvm::Constant::getIntegerValue(
           IntegerType::get(Ty->getContext(), 32), APInt(32, i));
       idxList.emplace_back(idx);
-
-      SplitCpy(ET, Dest, Src, idxList, bAllowReplace, Builder);
+      DxilFieldAnnotation &EltAnnotation = STA->GetFieldAnnotation(i);
+      SplitCpy(ET, Dest, Src, idxList, bAllowReplace, Builder, typeSys,
+               &EltAnnotation);
 
       idxList.pop_back();
     }
@@ -2216,7 +2238,7 @@ static void SplitCpy(Type *Ty, Value *Dest, Value *Src,
       Constant *idx = Constant::getIntegerValue(
           IntegerType::get(Ty->getContext(), 32), APInt(32, i));
       idxList.emplace_back(idx);
-      SplitCpy(ET, Dest, Src, idxList, bAllowReplace, Builder);
+      SplitCpy(ET, Dest, Src, idxList, bAllowReplace, Builder, typeSys, fieldAnnotation);
 
       idxList.pop_back();
     }
@@ -2330,7 +2352,10 @@ void MemcpySplitter::Split(llvm::Function &F) {
         }
         llvm::SmallVector<llvm::Value *, 16> idxList;
         // split
-        SplitCpy(Dest->getType(), Dest, Src, idxList, /*bAllowReplace*/true, Builder);
+        // Matrix is treated as scalar type, will not use memcpy.
+        // So use nullptr for fieldAnnotation should be safe here.
+        SplitCpy(Dest->getType(), Dest, Src, idxList, /*bAllowReplace*/ true,
+                 Builder, m_typeSys, /*fieldAnnotation*/ nullptr);
         // delete memcpy
         I->eraseFromParent();
         if (Instruction *op0 = dyn_cast<Instruction>(Op0)) {
@@ -4720,7 +4745,8 @@ void SROA_Parameter_HLSL::flattenArgument(
 
                 llvm::SmallVector<llvm::Value *, 16> idxList;
                 SplitCpy(data->getType(), outputVal, data, idxList,
-                         /*bAllowReplace*/ false, Builder);
+                         /*bAllowReplace*/ false, Builder, dxilTypeSys,
+                         &flatParamAnnotation);
 
                 CI->setArgOperand(HLOperandIndex::kStreamAppendDataOpIndex, outputVal);
               }
@@ -4746,7 +4772,8 @@ void SROA_Parameter_HLSL::flattenArgument(
 
                   llvm::SmallVector<llvm::Value *, 16> idxList;
                   SplitCpy(DataPtr->getType(), EltPtr, DataPtr, idxList,
-                           /*bAllowReplace*/ false, Builder);
+                           /*bAllowReplace*/ false, Builder, dxilTypeSys,
+                           &flatParamAnnotation);
                   CI->setArgOperand(i, EltPtr);
                 }
               }
@@ -4809,7 +4836,8 @@ void SROA_Parameter_HLSL::moveFunctionBody(Function *F, Function *flatF) {
   }
 }
 
-static void SplitArrayCopy(Value *V) {
+static void SplitArrayCopy(Value *V, DxilTypeSystem &typeSys,
+                           DxilFieldAnnotation *fieldAnnotation) {
   for (auto U = V->user_begin(); U != V->user_end();) {
     User *user = *(U++);
     if (StoreInst *ST = dyn_cast<StoreInst>(user)) {
@@ -4817,7 +4845,8 @@ static void SplitArrayCopy(Value *V) {
       Value *val = ST->getValueOperand();
       IRBuilder<> Builder(ST);
       SmallVector<Value *, 16> idxList;
-      SplitCpy(ptr->getType(), ptr, val, idxList, /*bAllowReplace*/ true, Builder);
+      SplitCpy(ptr->getType(), ptr, val, idxList, /*bAllowReplace*/ true,
+               Builder, typeSys, fieldAnnotation);
       ST->eraseFromParent();
     }
   }
@@ -4857,7 +4886,7 @@ static void CheckArgUsage(Value *V, bool &bLoad, bool &bStore) {
   }
 }
 // Support store to input and load from output.
-static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryAnnotation) {
+static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryAnnotation, DxilTypeSystem &typeSys) {
   BasicBlock &EntryBlk = F->getEntryBlock();
   Module *M = F->getParent();
   // Map from output to the temp created for it.
@@ -4931,8 +4960,6 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
     }
 
     if (HLMatrixLower::IsMatrixType(Ty)) {
-      isColMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
-                   MatrixOrientation::ColumnMajor;
       bNeedTemp = true;
       if (qual == DxilParamInputQual::In)
         bStoreInputToTemp = bLoad;
@@ -4955,33 +4982,8 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
       if (bStoreInputToTemp) {
         llvm::SmallVector<llvm::Value *, 16> idxList;
         // split copy.
-        SplitCpy(temp->getType(), temp, &arg, idxList, /*bAllowReplace*/ false, Builder);
-        if (isColMajor) {
-          auto Iter = Builder.GetInsertPoint();
-          Iter--;
-          while (cast<Instruction>(Iter) != temp) {
-            if (CallInst *CI = dyn_cast<CallInst>(Iter--)) {
-              HLOpcodeGroup group =
-                  GetHLOpcodeGroupByName(CI->getCalledFunction());
-              if (group == HLOpcodeGroup::HLMatLoadStore) {
-                HLMatLoadStoreOpcode opcode =
-                    static_cast<HLMatLoadStoreOpcode>(GetHLOpcode(CI));
-                switch (opcode) {
-                case HLMatLoadStoreOpcode::RowMatLoad: {
-                  CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
-                                    Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::ColMatLoad)));
-                } break;
-                case HLMatLoadStoreOpcode::RowMatStore:
-                  CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
-                                    Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::ColMatStore)));
-                  break;
-                }
-              }
-            }
-          }
-        }
+        SplitCpy(temp->getType(), temp, &arg, idxList, /*bAllowReplace*/ false,
+                 Builder, typeSys, &paramAnnotation);
       }
 
       // Generate store output, temp later.
@@ -5002,12 +5004,6 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
 
         DxilParameterAnnotation &paramAnnotation =
             EntryAnnotation->GetParameterAnnotation(output->getArgNo());
-        bool hasMatrix = paramAnnotation.HasMatrixAnnotation();
-        bool isColMajor = false;
-        if (hasMatrix) {
-          isColMajor = paramAnnotation.GetMatrixAnnotation().Orientation ==
-                       MatrixOrientation::ColumnMajor;
-        }
 
         auto Iter = Builder.GetInsertPoint();
         bool onlyRetBlk = false;
@@ -5017,34 +5013,7 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
           onlyRetBlk = true;
         // split copy.
         SplitCpy(output->getType(), output, temp, idxList,
-                 /*bAllowReplace*/ false, Builder);
-        if (isColMajor) {
-          if (onlyRetBlk)
-            Iter = BB.begin();
-
-          while (cast<Instruction>(Iter) != RI) {
-            if (CallInst *CI = dyn_cast<CallInst>(++Iter)) {
-              HLOpcodeGroup group =
-                  GetHLOpcodeGroupByName(CI->getCalledFunction());
-              if (group == HLOpcodeGroup::HLMatLoadStore) {
-                HLMatLoadStoreOpcode opcode =
-                    static_cast<HLMatLoadStoreOpcode>(GetHLOpcode(CI));
-                switch (opcode) {
-                case HLMatLoadStoreOpcode::RowMatLoad: {
-                  CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
-                                    Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::ColMatLoad)));
-                } break;
-                case HLMatLoadStoreOpcode::RowMatStore:
-                  CI->setArgOperand(HLOperandIndex::kOpcodeIdx,
-                                    Builder.getInt32(static_cast<unsigned>(
-                                        HLMatLoadStoreOpcode::ColMatStore)));
-                  break;
-                }
-              }
-            }
-          }
-        }
+                 /*bAllowReplace*/ false, Builder, typeSys, &paramAnnotation);
       }
       // Clone the return.
       Builder.CreateRet(RI->getReturnValue());
@@ -5054,8 +5023,9 @@ static void LegalizeDxilInputOutputs(Function *F, DxilFunctionAnnotation *EntryA
 }
 
 void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
+  DxilTypeSystem &typeSys = m_pHLModule->GetTypeSystem();
   // Change memcpy into ld/st first
-  MemcpySplitter splitter(F->getContext());
+  MemcpySplitter splitter(F->getContext(), typeSys);
   splitter.Split(*F);
 
   // Skip void (void) function.
@@ -5091,6 +5061,10 @@ void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
     Instruction *InsertPt = F->getEntryBlock().getFirstInsertionPt();
     IRBuilder<> Builder(InsertPt);
     Value *retValAddr = Builder.CreateAlloca(retType);
+    DxilParameterAnnotation &retAnnotation =
+        funcAnnotation->GetRetTypeAnnotation();
+    Module &M = *m_pHLModule->GetModule();
+    Type *voidTy = Type::getVoidTy(m_pHLModule->GetCtx());
     // Create DbgDecl for the ret value.
     if (DISubprogram *funcDI = getDISubprogram(F)) {
        DITypeRef RetDITyRef = funcDI->getType()->getTypeArray()[0];
@@ -5108,7 +5082,18 @@ void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
       if (ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator())) {
         // Create store for return.
         IRBuilder<> RetBuilder(RI);
-        RetBuilder.CreateStore(RI->getReturnValue(), retValAddr);
+        if (!retAnnotation.HasMatrixAnnotation()) {
+          RetBuilder.CreateStore(RI->getReturnValue(), retValAddr);
+        } else {
+          bool isRowMajor = retAnnotation.GetMatrixAnnotation().Orientation ==
+                            MatrixOrientation::RowMajor;
+          unsigned opcode = static_cast<unsigned>(
+              isRowMajor ? HLMatLoadStoreOpcode::RowMatStore
+                         : HLMatLoadStoreOpcode::ColMatStore);
+          HLModule::EmitHLOperationCall(
+              RetBuilder, HLOpcodeGroup::HLMatLoadStore, opcode, voidTy,
+              {retValAddr, RI->getReturnValue()}, M);
+        }
         // Clone the return.
         ReturnInst *NewRet = RetBuilder.CreateRet(RI->getReturnValue());
         if (RI == InsertPt) {
@@ -5182,7 +5167,7 @@ void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
       }
     }
     // Support store to input and load from output.
-    LegalizeDxilInputOutputs(F, funcAnnotation);
+    LegalizeDxilInputOutputs(F, funcAnnotation, typeSys);
     return;
   }
 
@@ -5267,17 +5252,22 @@ void SROA_Parameter_HLSL::createFlattenedFunction(Function *F) {
     // Flatten store of array parameter.
     if (Arg->getType()->isPointerTy()) {
       Type *Ty = Arg->getType()->getPointerElementType();
-      if (Ty->isArrayTy())
-        SplitArrayCopy(Arg);
+      if (Ty->isArrayTy()) {
+        SplitArrayCopy(
+            Arg, typeSys,
+            &flatFuncAnnotation->GetParameterAnnotation(Arg->getArgNo()));
+      }
     }
   }
   // Support store to input and load from output.
-  LegalizeDxilInputOutputs(flatF, flatFuncAnnotation);
+  LegalizeDxilInputOutputs(flatF, flatFuncAnnotation, typeSys);
 }
 
 void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *flatF, CallInst *CI) {
   DxilFunctionAnnotation *funcAnnotation = m_pHLModule->GetFunctionAnnotation(F);
   DXASSERT(funcAnnotation, "must find annotation for function");
+
+  DxilTypeSystem &typeSys = m_pHLModule->GetTypeSystem();
 
   std::vector<Value *> FlatParamList;
   std::vector<DxilParameterAnnotation> FlatParamAnnotationList;
@@ -5307,8 +5297,21 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
        DIB.insertDeclare(retValAddr, RetVar, Expr, DL, CI);
     }
 
+    DxilParameterAnnotation &retAnnotation = funcAnnotation->GetRetTypeAnnotation();
     // Load ret value and replace CI.
-    Value *newRetVal = RetBuilder.CreateLoad(retValAddr);
+    Value *newRetVal = nullptr;
+    if (!retAnnotation.HasMatrixAnnotation()) {
+      newRetVal = RetBuilder.CreateLoad(retValAddr);
+    } else {
+      bool isRowMajor = retAnnotation.GetMatrixAnnotation().Orientation ==
+                        MatrixOrientation::RowMajor;
+      unsigned opcode =
+          static_cast<unsigned>(isRowMajor ? HLMatLoadStoreOpcode::RowMatLoad
+                                           : HLMatLoadStoreOpcode::ColMatLoad);
+      newRetVal = HLModule::EmitHLOperationCall(RetBuilder, HLOpcodeGroup::HLMatLoadStore,
+                                    opcode, retType, {retValAddr},
+                                    *m_pHLModule->GetModule());
+    }
     CI->replaceAllUsesWith(newRetVal);
     // Flat ret val
     flattenArgument(flatF, retValAddr, funcAnnotation->GetRetTypeAnnotation(),
@@ -5339,15 +5342,19 @@ void SROA_Parameter_HLSL::createFlattenedFunctionCall(Function *F, Function *fla
       if (inputQual == DxilParamInputQual::In ||
           inputQual == DxilParamInputQual::Inout) {
         // Copy in param.
-        Value *v = CallBuilder.CreateLoad(arg);
-        CallBuilder.CreateStore(v, tempArg);
+        llvm::SmallVector<llvm::Value *, 16> idxList;
+        // split
+        SplitCpy(Ty, tempArg, arg, idxList, /*bAllowReplace*/ false, CallBuilder,
+                 typeSys, &paramAnnotation);
       }
 
       if (inputQual == DxilParamInputQual::Out ||
           inputQual == DxilParamInputQual::Inout) {
         // Copy out param.
-        Value *v = RetBuilder.CreateLoad(tempArg);
-        RetBuilder.CreateStore(v, arg);
+        llvm::SmallVector<llvm::Value *, 16> idxList;
+        // split
+        SplitCpy(Ty, arg, tempArg, idxList, /*bAllowReplace*/ false, RetBuilder,
+                 typeSys, &paramAnnotation);
       }
 
       arg = tempArg;
@@ -6239,6 +6246,7 @@ bool MultiDimArrayToOneDimArray::runOnModule(Module &M) {
   // used to load them.
   m_HasDbgInfo = getDebugMetadataVersionFromModule(M) != 0;
 
+  std::vector<AllocaInst*> multiDimAllocas;
   for (Function &F : M.functions()) {
     if (F.isDeclaration())
       continue;
@@ -6246,9 +6254,13 @@ bool MultiDimArrayToOneDimArray::runOnModule(Module &M) {
     for (BasicBlock::iterator I = BB.begin(); I != BB.end();) {
       if (AllocaInst *A = dyn_cast<AllocaInst>(I++)) {
         if (IsMultiDimArrayType(A->getAllocatedType()))
-          flattenAlloca(A);
+          multiDimAllocas.emplace_back(A);
       }
     }
+  }
+
+  for (AllocaInst *A : multiDimAllocas) {
+    flattenAlloca(A);
   }
 
   // Flatten internal global.
