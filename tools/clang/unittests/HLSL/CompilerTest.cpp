@@ -499,6 +499,7 @@ public:
   TEST_METHOD(CodeGenIntrinsic5)
   TEST_METHOD(CodeGenInvalidInputOutputTypes)
   TEST_METHOD(CodeGenLegacyStruct)
+  TEST_METHOD(CodeGenLibResource)
   TEST_METHOD(CodeGenLibUnusedFunc)
   TEST_METHOD(CodeGenLitInParen)
   TEST_METHOD(CodeGenLiteralShift)
@@ -2746,6 +2747,10 @@ TEST_F(CompilerTest, CodeGenInvalidInputOutputTypes) {
 
 TEST_F(CompilerTest, CodeGenLegacyStruct) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\legacy_struct.hlsl");
+}
+
+TEST_F(CompilerTest, CodeGenLibResource) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\lib_resource.hlsl");
 }
 
 TEST_F(CompilerTest, CodeGenLibUnusedFunc) {

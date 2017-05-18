@@ -97,6 +97,11 @@ public:
   const DxilResource &GetUAV(unsigned idx) const;
   const std::vector<std::unique_ptr<DxilResource> > &GetUAVs() const;
 
+  void CreateResourceLinkInfo();
+  struct ResourceLinkInfo;
+  const ResourceLinkInfo &GetResourceLinkInfo(DXIL::ResourceClass resClass,
+                                        unsigned rangeID) const;
+
   void LoadDxilResourceBaseFromMDNode(llvm::MDNode *MD, DxilResourceBase &R);
   void LoadDxilResourceFromMDNode(llvm::MDNode *MD, DxilResource &R);
   void LoadDxilSamplerFromMDNode(llvm::MDNode *MD, DxilSampler &S);
@@ -308,6 +313,14 @@ public:
   float GetMaxTessellationFactor() const;
   void SetMaxTessellationFactor(float MaxTessellationFactor);
 
+  // Shader resource information only needed before linking.
+  // Use constant as rangeID and index for resource in a library.
+  // When link the library, replace these constants with real rangeID and index.
+  struct ResourceLinkInfo {
+    llvm::Constant *ResRangeID;
+    llvm::Constant *ResIndex;
+  };
+
 private:
   // Signatures.
   std::unique_ptr<DxilSignature> m_InputSignature;
@@ -320,6 +333,12 @@ private:
   std::vector<std::unique_ptr<DxilResource> > m_UAVs;
   std::vector<std::unique_ptr<DxilCBuffer> > m_CBuffers;
   std::vector<std::unique_ptr<DxilSampler> > m_Samplers;
+
+  // Save resource link for library, when link replace it with real resource ID.
+  std::vector<ResourceLinkInfo> m_SRVsLinkInfo;
+  std::vector<ResourceLinkInfo> m_UAVsLinkInfo;
+  std::vector<ResourceLinkInfo> m_CBuffersLinkInfo;
+  std::vector<ResourceLinkInfo> m_SamplersLinkInfo;
 
   // Geometry shader.
   DXIL::InputPrimitive m_InputPrimitive;
@@ -367,6 +386,8 @@ private:
   // DXIL metadata serialization/deserialization.
   llvm::MDTuple *EmitDxilResources();
   void LoadDxilResources(const llvm::MDOperand &MDO);
+  void EmitDxilResourcesLinkInfo();
+  void LoadDxilResourcesLinkInfo();
   llvm::MDTuple *EmitDxilShaderProperties();
   void LoadDxilShaderProperties(const llvm::MDOperand &MDO);
 
