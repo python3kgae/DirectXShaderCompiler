@@ -53,4 +53,15 @@ private:
   std::vector<std::unique_ptr<DxilSignatureElement> > m_Elements;
 };
 
+struct DxilEntrySignature {
+  DxilEntrySignature(DXIL::ShaderKind shaderKind)
+      : InputSignature(shaderKind, DxilSignature::Kind::Input),
+        OutputSignature(shaderKind, DxilSignature::Kind::Output),
+        PatchConstantSignature(shaderKind, DxilSignature::Kind::PatchConstant) {
+  }
+  DxilSignature InputSignature;
+  DxilSignature OutputSignature;
+  DxilSignature PatchConstantSignature;
+};
+
 } // namespace hlsl
