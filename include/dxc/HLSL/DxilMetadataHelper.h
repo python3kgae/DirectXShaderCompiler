@@ -34,6 +34,7 @@ namespace hlsl {
 
 class ShaderModel;
 class DxilSignature;
+struct DxilEntrySignature;
 class DxilSignatureElement;
 class DxilModule;
 class DxilResourceBase;
@@ -280,9 +281,9 @@ public:
                          const llvm::MDOperand *&pProperties);
 
   // Signatures.
-  llvm::MDTuple *EmitDxilSignatures(const DxilSignature &InputSig, const DxilSignature &OutputSig, const DxilSignature &PCSig);
-  void LoadDxilSignatures(const llvm::MDOperand &MDO, DxilSignature &InputSig, 
-                          DxilSignature &OutputSig, DxilSignature &PCSig);
+  llvm::MDTuple *EmitDxilSignatures(const DxilEntrySignature &EntrySig);
+  void LoadDxilSignatures(const llvm::MDOperand &MDO,
+                          DxilEntrySignature &EntrySig);
   llvm::MDTuple *EmitSignatureMetadata(const DxilSignature &Sig);
   void EmitRootSignature(RootSignatureHandle &RootSig);
   void LoadSignatureMetadata(const llvm::MDOperand &MDO, DxilSignature &Sig);
