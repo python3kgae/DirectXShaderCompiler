@@ -1053,10 +1053,47 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   if (isEntry)
     EntryFunc = F;
 
+  DiagnosticsEngine &Diags = CGM.getDiags();
+
   std::unique_ptr<DxilFunctionProps> funcProps =
       llvm::make_unique<DxilFunctionProps>();
-  // TODO: add attribute to mark shader entry.
   funcProps->shaderKind = DXIL::ShaderKind::Invalid;
+  bool isCS = false;
+  bool isGS = false;
+  bool isHS = false;
+  bool isDS = false;
+  bool isVS = false;
+  bool isPS = false;
+  if (const HLSLShaderAttr *Attr = FD->getAttr<HLSLShaderAttr>()) {
+    const ShaderModel *pSM =
+        ShaderModel::GetByName(Attr->getProfile().str().c_str());
+    funcProps->shaderKind = pSM->GetKind();
+    switch (funcProps->shaderKind) {
+    case DXIL::ShaderKind::Compute:
+      isCS = true;
+      break;
+    case DXIL::ShaderKind::Vertex:
+      isVS = true;
+      break;
+    case DXIL::ShaderKind::Hull:
+      isHS = true;
+      break;
+    case DXIL::ShaderKind::Domain:
+      isDS = true;
+      break;
+    case DXIL::ShaderKind::Geometry:
+      isGS = true;
+      break;
+    case DXIL::ShaderKind::Pixel:
+      isPS = true;
+      break;
+    default: {
+      unsigned DiagID = Diags.getCustomDiagID(
+          DiagnosticsEngine::Error, "Invalid profile for shader attribute");
+      Diags.Report(Attr->getLocation(), DiagID);
+    } break;
+    }
+  }
 
   // Save patch constant function to patchConstantFunctionMap.
   bool isPatchConstantFunction = false;
@@ -1097,9 +1134,7 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
     funcProps->shaderKind = SM->GetKind();
   }
 
-  DiagnosticsEngine &Diags = CGM.getDiags();
   // Geometry shader.
-  bool isGS = false;
   if (const HLSLMaxVertexCountAttr *Attr =
           FD->getAttr<HLSLMaxVertexCountAttr>()) {
     isGS = true;
@@ -1132,7 +1167,6 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   }
 
   // Computer shader.
-  bool isCS = false;
   if (const HLSLNumThreadsAttr *Attr = FD->getAttr<HLSLNumThreadsAttr>()) {
     isCS = true;
     funcProps->shaderKind = DXIL::ShaderKind::Compute;
@@ -1150,7 +1184,6 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   }
 
   // Hull shader.
-  bool isHS = false;
   if (const HLSLPatchConstantFuncAttr *Attr =
           FD->getAttr<HLSLPatchConstantFuncAttr>()) {
     if (isEntry && !SM->IsHS()) {
@@ -1256,7 +1289,6 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   }
 
   // Hull or domain shader.
-  bool isDS = false;
   if (const HLSLDomainAttr *Attr = FD->getAttr<HLSLDomainAttr>()) {
     if (isEntry && !SM->IsHS() && !SM->IsDS()) {
       unsigned DiagID =
@@ -1278,7 +1310,6 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   }
 
   // Vertex shader.
-  bool isVS = false;
   if (const HLSLClipPlanesAttr *Attr = FD->getAttr<HLSLClipPlanesAttr>()) {
     if (isEntry && !SM->IsVS()) {
       unsigned DiagID = Diags.getCustomDiagID(
@@ -1294,7 +1325,6 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
   }
 
   // Pixel shader.
-  bool isPS = false;
   if (const HLSLEarlyDepthStencilAttr *Attr =
           FD->getAttr<HLSLEarlyDepthStencilAttr>()) {
     if (isEntry && !SM->IsPS()) {
