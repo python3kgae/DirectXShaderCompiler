@@ -844,6 +844,12 @@ def HLSLGloballyCoherent : InheritableAttr {
   let Documentation = [Undocumented];
 }
 
+def HLSLShader : InheritableAttr {
+  let Spellings = [CXX11<"", "shader", 2017>];
+  let Args = [StringArgument<"profile">]; // one of tri, quad, isoline
+  let Documentation = [Undocumented];
+}
+
 // HLSL Change Ends
 
 def C11NoReturn : InheritableAttr {

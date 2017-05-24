@@ -10005,6 +10005,14 @@ void hlsl::HandleDeclAttributeForHLSL(Sema &S, Decl *D, const AttributeList &A, 
     declAttr = ::new (S.Context) HLSLPatchConstantFuncAttr(A.getRange(), S.Context,
       ValidateAttributeStringArg(S, A, nullptr), A.getAttributeSpellingListIndex());
     break;
+  case AttributeList::AT_HLSLShader:
+    declAttr = ::new (S.Context) HLSLShaderAttr(
+        A.getRange(), S.Context,
+        ValidateAttributeStringArg(S, A,
+                                   "cs_6_0,cs_6_1,ps_6_0,ps_6_1,vs_6_0,vs_6_1, "
+                                   "hs_6_0,hs_6_1,ds_6_0,ds_6_1,gs_6_0,gs_6_1"),
+        A.getAttributeSpellingListIndex());
+    break;
   case AttributeList::AT_HLSLMaxVertexCount:
 	  declAttr = ::new (S.Context) HLSLMaxVertexCountAttr(A.getRange(), S.Context,
 		  ValidateAttributeIntArg(S, A), A.getAttributeSpellingListIndex());
@@ -11001,6 +11009,15 @@ void hlsl::CustomPrintHLSLAttr(const clang::Attr *A, llvm::raw_ostream &Out, con
     HLSLPatchConstantFuncAttr *ACast = static_cast<HLSLPatchConstantFuncAttr*>(noconst);
     Indent(Indentation, Out);
     Out << "[patchconstantfunc(\"" << ACast->getFunctionName() << "\")]\n";
+    break;
+  }
+
+  case clang::attr::HLSLShader:
+  {
+    Attr * noconst = const_cast<Attr*>(A);
+    HLSLShaderAttr *ACast = static_cast<HLSLShaderAttr*>(noconst);
+    Indent(Indentation, Out);
+    Out << "[shader(\"" << ACast->getProfile() << "\")]\n";
     break;
   }
   
