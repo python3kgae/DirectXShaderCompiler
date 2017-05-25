@@ -503,6 +503,7 @@ public:
   TEST_METHOD(CodeGenLibCsEntry2)
   TEST_METHOD(CodeGenLibCsEntry3)
   TEST_METHOD(CodeGenLibEntries)
+  TEST_METHOD(CodeGenLibEntries2)
   TEST_METHOD(CodeGenLibResource)
   TEST_METHOD(CodeGenLibUnusedFunc)
   TEST_METHOD(CodeGenLitInParen)
@@ -604,6 +605,7 @@ public:
   TEST_METHOD(CodeGenSelectObj4)
   TEST_METHOD(CodeGenSelectObj5)
   TEST_METHOD(CodeGenSelMat)
+  TEST_METHOD(CodeGenShaderAttr)
   TEST_METHOD(CodeGenShare_Mem_Dbg)
   TEST_METHOD(CodeGenShare_Mem_Phi)
   TEST_METHOD(CodeGenShare_Mem1)
@@ -2769,6 +2771,10 @@ TEST_F(CompilerTest, CodeGenLibEntries) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\lib_entries.hlsl");
 }
 
+TEST_F(CompilerTest, CodeGenLibEntries2) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\lib_entries2.hlsl");
+}
+
 TEST_F(CompilerTest, CodeGenLibResource) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\lib_resource.hlsl");
 }
@@ -3174,6 +3180,10 @@ TEST_F(CompilerTest, CodeGenSelectObj5) {
 
 TEST_F(CompilerTest, CodeGenSelMat) {
   CodeGenTestCheck(L"..\\CodeGenHLSL\\selMat.hlsl");
+}
+
+TEST_F(CompilerTest, CodeGenShaderAttr) {
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\shader_attr.hlsl");
 }
 
 TEST_F(CompilerTest, CodeGenShare_Mem_Dbg) {
