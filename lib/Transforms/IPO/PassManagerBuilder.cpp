@@ -229,10 +229,6 @@ static void addHLSLPasses(bool HLSLHighLevel, unsigned OptLevel, hlsl::HLSLExten
   // Split struct and array of parameter.
   MPM.add(createSROA_Parameter_HLSL());
 
-  // Split struct.
-  MPM.add(createScalarReplAggregatesHLSLPass(/*UseDomTree*/ true,
-                                             /*Promote*/ !NoOpt));
-
   MPM.add(createHLMatrixLowerPass());
   // DCE should after SROA to remove unused element.
   MPM.add(createDeadCodeEliminationPass());
