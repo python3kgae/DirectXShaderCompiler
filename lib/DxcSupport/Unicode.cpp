@@ -181,7 +181,11 @@ bool UTF8ToWideString(const char *pUTF8, size_t cbUTF8, std::wstring *pWide) {
 std::wstring UTF8ToWideStringOrThrow(_In_z_ const char *pUTF8) {
   std::wstring result;
   if (!UTF8ToWideString(pUTF8, &result)) {
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_STRING_ENCODING_FAILED);
+#else
+    assert(0 && "DXC_E_STRING_ENCODING_FAILED");
+#endif
   }
   return result;
 }
@@ -233,7 +237,11 @@ bool WideToUTF8String(const wchar_t *pWide, std::string *pUTF8) {
 std::string WideToUTF8StringOrThrow(_In_z_ const wchar_t *pWide) {
   std::string result;
   if (!WideToUTF8String(pWide, &result)) {
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_STRING_ENCODING_FAILED);
+#else
+    assert(0 && "DXC_E_STRING_ENCODING_FAILED");
+#endif
   }
   return result;
 }

@@ -1303,16 +1303,20 @@ int main(int argc, char **argv) {
   
   sys::PrintStackTraceOnErrorSignal();
   PrettyStackTraceProgram X(argc, argv);
+#ifndef NO_EXCEPTION
   // HLSL Change Starts - protect ParseCommandLineOptions
   try
   {
+  #endif
   cl::ParseCommandLineOptions(argc, argv);
+#ifndef NO_EXCEPTION
   }
   catch (...)
   {
     return 2;
   }
   // HLSL Change Ends - protect ParseCommandLineOptions
+#endif
 
   if (!ValidateCheckPrefixes()) {
     errs() << "Supplied check-prefix is invalid! Prefixes must be unique and "

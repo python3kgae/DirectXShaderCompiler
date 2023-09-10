@@ -175,13 +175,21 @@ static void WritePartToFile(IDxcBlob *pBlob, hlsl::DxilFourCC CC,
   const hlsl::DxilContainerHeader *pContainer = hlsl::IsDxilContainerLike(
       pBlob->GetBufferPointer(), pBlob->GetBufferSize());
   if (!pContainer) {
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(E_FAIL, "Unable to find required part in blob");
+#else
+    assert(0 && "Unable to find required part in blob");
+#endif
   }
   hlsl::DxilPartIsType pred(CC);
   hlsl::DxilPartIterator it =
       std::find_if(hlsl::begin(pContainer), hlsl::end(pContainer), pred);
   if (it == hlsl::end(pContainer)) {
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(E_FAIL, "Unable to find required part in blob");
+#else
+    assert(0 && "Unable to find required part in blob");
+#endif
   }
 
   const char *pData = hlsl::GetDxilPartData(*it);
@@ -643,7 +651,9 @@ public:
   }
 
   HRESULT insertIncludeFile(_In_ LPCWSTR pFilename, _In_ IDxcBlobEncoding *pBlob, _In_ UINT32 dataLen) {
+#ifndef NO_EXCEPTION
     try {
+#endif
 #ifdef _WIN32
       includeFiles.try_emplace(std::wstring(pFilename), pBlob);
 #else
@@ -652,8 +662,10 @@ public:
       if (includeFiles.find(std::wstring(pFilename)) == includeFiles.end())
         includeFiles.emplace(std::wstring(pFilename), pBlob);
 #endif // _WIN32
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT()
+#endif
     return S_OK;
   }
 
@@ -661,7 +673,9 @@ public:
     _In_ LPCWSTR pFilename,
     _COM_Outptr_result_maybenull_ IDxcBlob **ppIncludeSource
   ) override {
+#ifndef NO_EXCEPTION
     try {
+#endif
       // Convert pFilename into native form for indexing as is done when the MD is created
       std::string FilenameStr8 = Unicode::WideToUTF8StringOrThrow(pFilename);
       llvm::SmallString<128> NormalizedPath;
@@ -669,8 +683,10 @@ public:
       std::wstring FilenameStr16 = Unicode::UTF8ToWideStringOrThrow(NormalizedPath.c_str());
       *ppIncludeSource = includeFiles.at(FilenameStr16);
       (*ppIncludeSource)->AddRef();
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT()
+#endif
     return S_OK;
   }
 };
@@ -1350,10 +1366,15 @@ int dxc::main(int argc, const char **argv_) {
   int retVal = 0;
   if (FAILED(DxcInitThreadMalloc())) return 1;
   DxcSetThreadMallocToDefault();
+#ifndef NO_EXCEPTION
   try {
+#endif
     pStage = "Argument processing";
+#ifndef NO_EXCEPTION
     if (initHlslOptTable()) throw std::bad_alloc();
-
+#else
+    if (initHlslOptTable()) assert(0 && "bad alloc");
+#endif
     // Parse command line options.
     const OptTable *optionTable = getHlslOptTable();
     MainArgs argStrings(argc, argv_);
@@ -1445,6 +1466,7 @@ int dxc::main(int argc, const char **argv_) {
       pStage = "Compilation";
       retVal = context.Compile();
     }
+#ifndef NO_EXCEPTION
   } catch (const ::hlsl::Exception &hlslException) {
     try {
       const char *msg = hlslException.what();
@@ -1515,6 +1537,6 @@ int dxc::main(int argc, const char **argv_) {
     printf("%s failed - unknown error.\n", pStage);
     return 1;
   }
-
+#endif
   return retVal;
 }

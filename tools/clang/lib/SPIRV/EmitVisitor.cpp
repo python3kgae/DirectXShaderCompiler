@@ -134,7 +134,9 @@ uint32_t getHeaderVersion(spv_target_env env) {
 // Read the file in |filePath| and returns its contents as a string.
 // This function will be used by DebugSource to get its source code.
 std::string ReadSourceCode(llvm::StringRef filePath) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     dxc::DxcDllSupport dllSupport;
     IFT(dllSupport.Initialize());
 
@@ -149,10 +151,13 @@ std::string ReadSourceCode(llvm::StringRef filePath) {
     IFT(hlsl::DxcGetBlobAsUtf8(pSource, nullptr, &utf8Source));
     return std::string(utf8Source->GetStringPointer(),
                        utf8Source->GetStringLength());
+
+#ifndef NO_EXCEPTION
   } catch (...) {
     // An exception has occured while reading the file
     return "";
   }
+#endif
 }
 
 // Returns a vector of strings after chopping |inst| for the operand size

@@ -1015,7 +1015,9 @@ DxcIndex::~DxcIndex()
 }
 
 HRESULT DxcIndex::Initialize(hlsl::DxcLangExtensionsHelper &langHelper) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     m_langHelper = langHelper; // Clone the object.
     m_index = clang_createIndex(1, 0);
     if (m_index == 0) {
@@ -1024,8 +1026,10 @@ HRESULT DxcIndex::Initialize(hlsl::DxcLangExtensionsHelper &langHelper) {
 
     hlsl::DxcLangExtensionsHelperApply* apply = &m_langHelper;
     clang_index_setLangHelper(m_index, apply);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
   return S_OK;
 }
 
@@ -1079,9 +1083,10 @@ HRESULT DxcIndex::ParseTranslationUnit(
   CXUnsavedFile* files;
   HRESULT hr = SetupUnsavedFiles(unsaved_files, num_unsaved_files, &files);
   if (FAILED(hr)) return hr;
-
+#ifndef NO_EXCEPTION
   try
   {
+#endif
     // TODO: until an interface to file access is defined and implemented, simply fall back to pure Win32/CRT calls.
     ::llvm::sys::fs::MSFileSystem* msfPtr;
     IFT(CreateMSFileSystemForDisk(&msfPtr));
@@ -1108,8 +1113,10 @@ HRESULT DxcIndex::ParseTranslationUnit(
     *pTranslationUnit = localTU.Detach();
 
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////

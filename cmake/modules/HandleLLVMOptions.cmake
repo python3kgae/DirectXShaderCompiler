@@ -588,6 +588,10 @@ if(LLVM_ENABLE_EH AND NOT LLVM_ENABLE_RTTI)
   message(FATAL_ERROR "Exception handling requires RTTI. You must set LLVM_ENABLE_RTTI to ON")
 endif()
 
+if (NOT LLVM_ENABLE_EH)
+add_definitions( -DNO_EXCEPTION )
+endif()
+
 # HLSL Change Begin
 option(LLVM_ENABLE_LTO "Enable building with LTO" ${HLSL_OFFICIAL_BUILD})
 if (LLVM_ENABLE_LTO)

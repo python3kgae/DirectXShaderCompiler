@@ -1414,11 +1414,15 @@ FunctionPassManager::FunctionPassManager(Module *m) : M(m) {
   // FPM is the top level manager.
   FPM->setTopLevelManager(FPM);
 
+#ifdef NO_EXCEPTION
+  AnalysisResolver *AR = new AnalysisResolver(*FPM);
+#else
   AnalysisResolver *AR = new (std::nothrow)AnalysisResolver(*FPM); // HLSL Change: nothrow and recover
   if (!AR) {
     delete FPM;
     throw std::bad_alloc();
   }
+#endif
   FPM->setResolver(AR);
 }
 

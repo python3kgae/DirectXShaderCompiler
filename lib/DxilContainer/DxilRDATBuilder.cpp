@@ -122,19 +122,33 @@ public:
 
   size_t GetOffset() const { return Offset; }
   void Reset(size_t offset = 0) {
+#ifndef NO_EXCEPTION
     if (offset >= Size) throw buffer_overrun{};
+#else
+    if (offset >= Size) assert(0 && "buffer overrun");
+#endif
     Offset = offset;
   }
   // offset is absolute, ensure offset is >= current offset
   void Advance(size_t offset = 0) {
+  #ifndef NO_EXCEPTION
     if (offset < Offset) throw buffer_overlap{};
     if (offset >= Size) throw buffer_overrun{};
+  #else
+    if (offset < Offset) assert(0 && "buffer overlap");
+    if (offset >= Size) assert(0 && "buffer overrun");
+
+  #endif
     Offset = offset;
   }
   void CheckBounds(size_t size) const {
     assert(Offset <= Size && "otherwise, offset larger than size");
     if (size > Size - Offset)
+#ifndef NO_EXCEPTION
       throw buffer_overrun{};
+#else
+      assert(0 && "buffer overrun");
+#endif
   }
   template <typename T>
   T *Cast(size_t size = 0) {
@@ -194,7 +208,9 @@ void StringBufferPart::Write(void *ptr) {
 }
 
 StringRef DxilRDATBuilder::FinalizeAndGetData() {
+#ifndef NO_EXCEPTION
   try {
+#endif
     m_RDATBuffer.resize(size(), 0);
     CheckedWriter W(m_RDATBuffer.data(), m_RDATBuffer.size());
     // write RDAT header
@@ -216,10 +232,12 @@ StringRef DxilRDATBuilder::FinalizeAndGetData() {
       char *bytes = W.MapArray<char>(partHeader.Size);
       part->Write(bytes);
     }
+#ifndef NO_EXCEPTION
   }
   catch (CheckedWriter::exception e) {
     throw hlsl::Exception(DXC_E_GENERAL_INTERNAL_ERROR, e.what());
   }
+#endif
   return llvm::StringRef(m_RDATBuffer.data(), m_RDATBuffer.size());
 }
 

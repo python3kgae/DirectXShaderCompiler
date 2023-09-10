@@ -29,7 +29,11 @@
 
 inline HRESULT IFE(HRESULT hr) {
   if (FAILED(hr)) {
+#ifndef NO_EXCEPTION
     throw std::runtime_error("COM call failed");
+#else
+    assert(0 && "COM call failed");
+#endif
   }
   return hr;
 }

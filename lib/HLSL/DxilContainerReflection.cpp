@@ -344,15 +344,19 @@ HRESULT DxilContainerReflection::Load(IDxcBlob *pContainer) {
   }
 
   CComPtr<IDxcBlob> pPDBContainer;
+#ifndef NO_EXCEPTION
   try {
+#endif
     DxcThreadMalloc DxcMalloc(m_pMalloc);
     CComPtr<IStream> pStream;
     IFR(hlsl::CreateReadOnlyBlobStream(pContainer, &pStream));
     if (SUCCEEDED(hlsl::pdb::LoadDataFromStream(m_pMalloc, pStream, &pPDBContainer))) {
       pContainer = pPDBContainer;
     }
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 
   uint32_t bufLen = pContainer->GetBufferSize();
   const DxilContainerHeader *pHeader =
@@ -456,7 +460,9 @@ Cleanup:
 void hlsl::CreateDxcContainerReflection(IDxcContainerReflection **ppResult) {
   CComPtr<DxilContainerReflection> pReflection = DxilContainerReflection::Alloc(DxcGetThreadMallocNoRef());
   *ppResult = pReflection.Detach();
+#ifndef NO_EXCEPTION
   if (*ppResult == nullptr) throw std::bad_alloc();
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2110,7 +2116,9 @@ HRESULT DxilModuleReflection::LoadRDAT(const DxilPartHeader *pPart) {
 }
 
 HRESULT DxilModuleReflection::LoadProgramHeader(const DxilProgramHeader *pProgramHeader) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     const char *pBitcode;
     uint32_t bitcodeLength;
     GetDxilProgramBitcode((const DxilProgramHeader *)pProgramHeader, &pBitcode, &bitcodeLength);
@@ -2139,15 +2147,18 @@ HRESULT DxilModuleReflection::LoadProgramHeader(const DxilProgramHeader *pProgra
 
     CreateReflectionObjects();
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 HRESULT DxilShaderReflection::Load(const DxilProgramHeader *pProgramHeader, const DxilPartHeader *pRDATPart) {
   IFR(LoadRDAT(pRDATPart));
   IFR(LoadProgramHeader(pProgramHeader));
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     // Set cbuf usage.
     if (!m_bUsageInMetadata)
       SetCBufferUsage();
@@ -2162,8 +2173,10 @@ HRESULT DxilShaderReflection::Load(const DxilProgramHeader *pProgramHeader, cons
     InitDesc();
 
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 _Use_decl_annotations_
@@ -2827,14 +2840,17 @@ void DxilLibraryReflection::SetCBufferUsage() {
 HRESULT DxilLibraryReflection::Load(const DxilProgramHeader *pProgramHeader, const DxilPartHeader *pRDATPart) {
   IFR(LoadRDAT(pRDATPart));
   IFR(LoadProgramHeader(pProgramHeader));
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     AddResourceDependencies();
     if (!m_bUsageInMetadata)
       SetCBufferUsage();
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 _Use_decl_annotations_

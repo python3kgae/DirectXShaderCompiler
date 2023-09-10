@@ -240,8 +240,12 @@ void LLVMContext::diagnose(const DiagnosticInfo &DI) {
   DI.print(DP);
   errs() << "\n";
   if (DI.getSeverity() == DS_Error)
-    // exit(1); // HLSL Change - unwind if necessary, but don't terminate the process
+#ifdef NO_EXCEPTION
+    exit(1);
+#else
+    // HLSL Change - unwind if necessary, but don't terminate the process
     throw std::exception();
+#endif
 }
 
 void LLVMContext::emitError(unsigned LocCookie, const Twine &ErrorStr) {

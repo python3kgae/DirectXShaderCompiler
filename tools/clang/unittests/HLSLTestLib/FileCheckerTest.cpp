@@ -239,7 +239,9 @@ public:
     *ppIncludeSource = nullptr;
     if (!pFilename)
       return E_INVALIDARG;
+#ifndef NO_EXCEPTION
     try {
+#endif
       if (pVFS) {
         auto it = pVFS->find(pFilename);
         if (it != pVFS->end()) {
@@ -250,8 +252,10 @@ public:
         return pInnerIncludeHandler->LoadSource(pFilename, ppIncludeSource);
       }
       return E_FAIL;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 };
 

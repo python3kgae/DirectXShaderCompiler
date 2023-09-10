@@ -334,13 +334,16 @@ void DxaContext::DumpRS() {
   hlsl::RootSignatureHandle rootsig;
   rootsig.LoadSerialized(static_cast<const uint8_t *>(serializedData),
                          serializedSize);
+#ifndef NO_EXCEPTION
   try {
     rootsig.Deserialize();
   } catch (const hlsl::Exception &e) {
     printf("fail to deserialize root sig %s", e.msg.c_str());
     return;
   }
-
+#else
+  rootsig.Deserialize();
+#endif
   if (const hlsl::DxilVersionedRootSignatureDesc *pRS = rootsig.GetDesc()) {
     std::string str;
     llvm::raw_string_ostream os(str);
@@ -458,7 +461,9 @@ int main(int argc, const char **argv) {
   DxcSetThreadMallocToDefault();
 
   const char *pStage = "Operation";
+#ifndef NO_EXCEPTION
   try {
+#endif
     llvm::sys::fs::MSFileSystem *msfPtr;
     IFT(CreateMSFileSystemForDisk(&msfPtr));
     std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -512,6 +517,7 @@ int main(int argc, const char **argv) {
       pStage = "Assembling";
       context.Assemble();
     }
+#ifndef NO_EXCEPTION
   } catch (const ::hlsl::Exception &hlslException) {
     try {
       const char *msg = hlslException.what();
@@ -536,6 +542,6 @@ int main(int argc, const char **argv) {
     printf("%s failed - unknown error.\n", pStage);
     return 1;
   }
-
+#endif
   return 0;
 }

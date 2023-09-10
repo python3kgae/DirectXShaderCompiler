@@ -101,6 +101,7 @@ void CheckLLVMErrorCode(const std::error_code &ec);
 #define IFCOOM(x)   { if (nullptr == (x)) { hr = E_OUTOFMEMORY; goto Cleanup; } }
 #define IFROOM(x)   { if (nullptr == (x)) { return E_OUTOFMEMORY; } }
 #define IFCPTR(x)   { if (nullptr == (x)) { hr = E_POINTER; goto Cleanup; }}
+#ifndef NO_EXCEPTION
 #define IFT(x)      { HRESULT __hr = (x); if (DXC_FAILED(__hr)) throw ::hlsl::Exception(__hr); }
 #define IFTBOOL(x,y){ if (!(x)) throw ::hlsl::Exception(y); }
 #define IFTOOM(x)   { if (nullptr == (x)) { throw ::hlsl::Exception(E_OUTOFMEMORY); }}
@@ -109,6 +110,16 @@ void CheckLLVMErrorCode(const std::error_code &ec);
 #define IFTLLVM(x)  { CheckLLVMErrorCode(x); }
 #define IFTMSG(x, msg) { HRESULT __hr = (x); if (DXC_FAILED(__hr)) throw ::hlsl::Exception(__hr, msg); }
 #define IFTBOOLMSG(x, y, msg) { if (!(x)) throw ::hlsl::Exception(y, msg); }
+#else
+#define IFT(x)      { HRESULT __hr = (x); if (DXC_FAILED(__hr)) assert(0); }
+#define IFTBOOL(x,y){ if (!(x)) assert(0); }
+#define IFTOOM(x)   { if (nullptr == (x)) { assert(0 && "E_OUTOFMEMORY"); }}
+#define IFTPTR(x)   { if (nullptr == (x)) { assert(0 && "E_POINTER"); }}
+#define IFTARG(x)   { if (!(x)) { assert(0 && "E_INVALIDARG"); }}
+#define IFTLLVM(x)  { CheckLLVMErrorCode(x); }
+#define IFTMSG(x, msg) { HRESULT __hr = (x); if (DXC_FAILED(__hr)) assert(0); }
+#define IFTBOOLMSG(x, y, msg) { if (!(x)) assert(0); }
+#endif
 
 // Propagate an C++ exception into an HRESULT.
 #define CATCH_CPP_ASSIGN_HRESULT() \
@@ -128,7 +139,11 @@ void CheckLLVMErrorCode(const std::error_code &ec);
 
 template<typename T> T *VerifyNullAndThrow(T *p) {
   if (p == nullptr)
+  #ifndef NO_EXCEPTION
     throw std::bad_alloc();
+  #else
+    assert(0 && "bad_alloc");
+  #endif
   return p;
 }
 #define VNT(__p) VerifyNullAndThrow(__p)

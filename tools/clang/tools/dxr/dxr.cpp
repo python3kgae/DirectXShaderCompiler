@@ -42,9 +42,14 @@ int main(int argc, const char **argv) {
 #endif
   if (FAILED(DxcInitThreadMalloc())) return 1;
   DxcSetThreadMallocToDefault();
+#ifndef NO_EXCEPTION
   try {
+#endif
+#ifndef NO_EXCEPTION
     if (initHlslOptTable()) throw std::bad_alloc();
-
+#else
+    if (initHlslOptTable()) assert(0 && "bad alloc");
+#endif
     // Parse command line options.
     const OptTable *optionTable = getHlslOptTable();
     MainArgs argStrings(argc, argv_);
@@ -152,7 +157,7 @@ int main(int argc, const char **argv) {
         printf("Rewrite output: %s", dxcOpts.OutputObject.data());
       }
     }
-
+#ifndef NO_EXCEPTION
   }
   catch (const ::hlsl::Exception& hlslException) {
     try {
@@ -186,6 +191,6 @@ int main(int argc, const char **argv) {
     printf("Compilation failed - unable to retrieve error message.\n");
     return 1;
   }
-
+#endif
   return 0;
 }

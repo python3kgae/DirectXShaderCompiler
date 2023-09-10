@@ -74,7 +74,9 @@ HRESULT STDMETHODCALLTYPE DxcAssembler::AssembleToContainer(
   *ppResult = nullptr;
   HRESULT hr = S_OK;
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     ::llvm::sys::fs::MSFileSystem *msfPtr;
     IFT(CreateMSFileSystemForDisk(&msfPtr));
     std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -126,9 +128,10 @@ HRESULT STDMETHODCALLTYPE DxcAssembler::AssembleToContainer(
         }, ppResult));
       return S_OK;
     }
-
+#ifndef NO_EXCEPTION
     // Upgrade Validator Version if necessary.
     try {
+#endif
       DxilModule &program = M->GetOrCreateDxilModule();
 
       // Only set validator version metadata if none present.
@@ -139,6 +142,7 @@ HRESULT STDMETHODCALLTYPE DxcAssembler::AssembleToContainer(
           program.UpdateValidatorVersionMetadata();
         }
       }
+#ifndef NO_EXCEPTION
     } catch (hlsl::Exception &e) {
       IFT(DxcResult::Create(e.hr, DXC_OUT_NONE, {
           DxcOutputObject::ErrorOutput(CP_UTF8,   // TODO Support DefaultTextCodePage
@@ -146,6 +150,7 @@ HRESULT STDMETHODCALLTYPE DxcAssembler::AssembleToContainer(
         }, ppResult));
       return S_OK;
     }
+#endif
     // Create bitcode of M.
     WriteBitcodeToFile(M.get(), outStream);
     outStream.flush();
@@ -165,9 +170,10 @@ HRESULT STDMETHODCALLTYPE DxcAssembler::AssembleToContainer(
     IFT(DxcResult::Create(S_OK, DXC_OUT_OBJECT, {
         DxcOutputObject::DataOutput(DXC_OUT_OBJECT, pResultBlob, DxcOutNoName)
       }, ppResult));
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_ASSIGN_HRESULT();
-
+#endif
   return hr;
 }
 

@@ -317,8 +317,9 @@ HRESULT SetRootSignature(hlsl::DxilModule *pModule, CComPtr<IDxcBlob> pSource) {
     if (curPartKind == partKind) {
       CComPtr<IDxcBlob> pContent;
       IFT(pReflection->GetPartContent(i, &pContent));
-
+#ifndef NO_EXCEPTION
       try {
+#endif
         const void *serializedData = pContent->GetBufferPointer();
         uint32_t serializedSize = pContent->GetBufferSize();
         hlsl::RootSignatureHandle rootSig;
@@ -329,9 +330,11 @@ HRESULT SetRootSignature(hlsl::DxilModule *pModule, CComPtr<IDxcBlob> pSource) {
                                        rootSig.GetSerializedBytes()
                                            +rootSig.GetSerializedSize());
         pModule->ResetSerializedRootSignature(serializedRootSignature);
+#ifndef NO_EXCEPTION
       } catch (...) {
         return DXC_E_INCORRECT_ROOT_SIGNATURE;
       }
+#endif
     }
   }
   return S_OK;

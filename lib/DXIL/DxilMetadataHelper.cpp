@@ -274,7 +274,11 @@ void DxilMDHelper::LoadDxilShaderModel(const ShaderModel *&pSM) {
     StringCchPrintfA(ErrorMsgTxt, _countof(ErrorMsgTxt),
                      "Unknown shader model '%s'", ShaderModelName.c_str());
     string ErrorMsg(ErrorMsgTxt);
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_INCORRECT_DXIL_METADATA, ErrorMsg);
+#else
+    assert(0 && "Unknown shader model");
+#endif
   }
   SetShaderModel(pSM);
 }
@@ -311,7 +315,12 @@ void DxilMDHelper::LoadDxilIntermediateOptions(uint32_t &flags) {
       flags = ConstMDToUint32(pEntry->getOperand(1));
       break;
 
-    default: throw hlsl::Exception(DXC_E_INCORRECT_DXIL_METADATA, "Unrecognized intermediate options metadata");
+    default:
+#ifndef NO_EXCEPTION
+    throw hlsl::Exception(DXC_E_INCORRECT_DXIL_METADATA, "Unrecognized intermediate options metadata");
+#else
+    assert(0 && "Unrecognized intermediate options metadata");
+#endif
     }
   }
 }

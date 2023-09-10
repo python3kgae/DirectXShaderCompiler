@@ -192,8 +192,9 @@ DxcLinker::RegisterLibrary(_In_opt_ LPCWSTR pLibName, // Name of the library.
   // Already exist lib with same name.
   if (m_pLinker->HasLibNameRegistered(pUtf8LibName.m_psz))
     return E_INVALIDARG;
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     std::unique_ptr<llvm::Module> pModule, pDebugModule;
 
     CComPtr<AbstractMemoryStream> pDiagStream;
@@ -228,9 +229,11 @@ DxcLinker::RegisterLibrary(_In_opt_ LPCWSTR pLibName, // Name of the library.
     } else {
       return E_INVALIDARG;
     }
+#ifndef NO_EXCEPTION
   } catch (hlsl::Exception &) {
     return E_INVALIDARG;
   }
+#endif
 }
 
 // Links the shader and produces a shader blob that the Direct3D runtime can
@@ -251,7 +254,7 @@ HRESULT STDMETHODCALLTYPE DxcLinker::Link(
     return E_INVALIDARG;
   DxcThreadMalloc TM(m_pMalloc);
   // Prepare UTF8-encoded versions of API values.
-  CW2A pUtf8TargetProfile(pTargetProfile, CP_UTF8);
+  //CW2A pUtf8TargetProfile(pTargetProfile, CP_UTF8);
   CW2A pUtf8EntryPoint(pEntryName, CP_UTF8);
 
   CComPtr<AbstractMemoryStream> pOutputStream;
@@ -260,7 +263,9 @@ HRESULT STDMETHODCALLTYPE DxcLinker::Link(
   m_pLinker->DetachAll();
 
   HRESULT hr = S_OK;
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<IDxcBlob> pOutputBlob;
     CComPtr<AbstractMemoryStream> pDiagStream;
 
@@ -422,18 +427,24 @@ HRESULT STDMETHODCALLTYPE DxcLinker::Link(
     CComPtr<IStream> pStream = static_cast<CComPtr<IStream>>(pDiagStream);
     dxcutil::CreateOperationResultFromOutputs(pOutputBlob, pStream, warnings,
                                               hasErrorOccurred, ppResult);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_ASSIGN_HRESULT();
+#endif
   return hr;
 }
 
 HRESULT CreateDxcLinker(_In_ REFIID riid, _Out_ LPVOID *ppv) {
   *ppv = nullptr;
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<DxcLinker> result(DxcLinker::Alloc(DxcGetThreadMallocNoRef()));
     IFROOM(result.p);
     result->Initialize();
     return result.p->QueryInterface(riid, ppv);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }

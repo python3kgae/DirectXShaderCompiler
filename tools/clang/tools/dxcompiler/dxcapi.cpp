@@ -47,14 +47,18 @@ void CreateDxcLinker(IDxcContainerReflection **ppResult);
 }
 
 HRESULT CreateDxcContainerReflection(_In_ REFIID riid, _Out_ LPVOID *ppv) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<IDxcContainerReflection> pReflection;
     hlsl::CreateDxcContainerReflection(&pReflection);
     return pReflection->QueryInterface(riid, ppv);
+#ifndef NO_EXCEPTION
   }
   catch (const std::bad_alloc&) {
     return E_OUTOFMEMORY;
   }
+#endif
 }
 
 HRESULT CreateDxcContainerBuilder(_In_ REFIID riid, _Out_ LPVOID *ppv) {

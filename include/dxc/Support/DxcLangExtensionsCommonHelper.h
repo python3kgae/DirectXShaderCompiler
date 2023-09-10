@@ -38,30 +38,46 @@ private:
   std::string m_targetTriple;
   HRESULT STDMETHODCALLTYPE RegisterIntoVector(LPCWSTR name, llvm::SmallVector<std::string, 2>& here)
   {
+#ifndef NO_EXCEPTION
     try {
+#endif
       IFTPTR(name);
       std::string s;
       if (!Unicode::WideToUTF8String(name, &s)) {
+#ifndef NO_EXCEPTION
         throw ::hlsl::Exception(E_INVALIDARG);
+#else
+        assert(0 && "invalidarg");
+#endif
       }
       here.push_back(s);
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   HRESULT STDMETHODCALLTYPE RegisterIntoSet(LPCWSTR name, llvm::SetVector<std::string>& here)
   {
+#ifndef NO_EXCEPTION
     try {
+#endif
       IFTPTR(name);
       std::string s;
       if (!Unicode::WideToUTF8String(name, &s)) {
+#ifndef NO_EXCEPTION
         throw ::hlsl::Exception(E_INVALIDARG);
+#else
+        assert(0 && "invalidarg");
+#endif
       }
       here.insert(s);
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
 public:
@@ -95,7 +111,9 @@ public:
 
   HRESULT STDMETHODCALLTYPE RegisterIntrinsicTable(_In_ IDxcIntrinsicTable* pTable)
   {
+#ifndef NO_EXCEPTION
     try {
+#endif
       IFTPTR(pTable);
       LPCSTR tableName = nullptr;
       IFT(pTable->GetTableName(&tableName));
@@ -109,8 +127,10 @@ public:
       }
       m_intrinsicTables.push_back(pTable);
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   // Set the validator used to validate semantic defines.
@@ -124,19 +144,27 @@ public:
   }
 
   HRESULT STDMETHODCALLTYPE SetSemanticDefineMetaDataName(LPCSTR name) {
+#ifndef NO_EXCEPTION
     try {
+#endif
       m_semanticDefineMetaDataName = name;
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   HRESULT STDMETHODCALLTYPE SetTargetTriple(LPCSTR triple) {
+#ifndef NO_EXCEPTION
     try {
+#endif
       m_targetTriple = triple;
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   // Get the name of the dxil intrinsic function.

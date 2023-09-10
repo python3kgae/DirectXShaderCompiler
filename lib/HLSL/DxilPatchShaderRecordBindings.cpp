@@ -184,7 +184,11 @@ char DxilPatchShaderRecordBindings::ID = 0;
 
 // TODO: Find the right thing to do on failure
 void ThrowFailure() {
+#ifndef NO_EXCEPTION
   throw std::exception();
+#else
+  assert(0);
+#endif
 }
 
 // TODO: Stolen from Brandon's code, merge
@@ -401,7 +405,11 @@ bool DxilPatchShaderRecordBindings::runOnModule(Module &M) {
 
 void DxilPatchShaderRecordBindings::ValidateParameters() {
   if (!pInputShaderInfo || !pInputShaderInfo->pRootSignatureDesc) {
+#ifndef NO_EXCEPTION
     throw std::exception();
+#else
+    assert(0);
+#endif
   }
 }
 

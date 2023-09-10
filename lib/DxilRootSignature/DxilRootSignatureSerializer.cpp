@@ -298,8 +298,9 @@ void SerializeRootSignature(const DxilVersionedRootSignatureDesc *pRootSignature
     DxcCreateBlobWithEncodingOnHeapCopy(DiagString.c_str(), DiagString.size(), CP_UTF8, ppErrorBlob);
     return;
   }
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     switch (pRootSignature->Version)
     {
     case DxilRootSignatureVersion::Version_1_0:
@@ -326,10 +327,12 @@ void SerializeRootSignature(const DxilVersionedRootSignatureDesc *pRootSignature
           bAllowReservedRegisterSpace);
       break;
     }
+#ifndef NO_EXCEPTION
   } catch (...) {
     DiagStream.flush();
     DxcCreateBlobWithEncodingOnHeapCopy(DiagString.c_str(), DiagString.size(), CP_UTF8, ppErrorBlob);
   }
+#endif
 }
 
 template<typename T_ROOT_SIGNATURE_DESC,
@@ -441,8 +444,9 @@ void DeserializeRootSignature(const void *pSrcData,
   const DxilRootSignatureVersion Version = (const DxilRootSignatureVersion)((const uint32_t*)pData)[0];
 
   pRootSignature = new DxilVersionedRootSignatureDesc();
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     switch (Version) {
     case DxilRootSignatureVersion::Version_1_0:
       pRootSignature->Version = DxilRootSignatureVersion::Version_1_0;
@@ -476,10 +480,12 @@ void DeserializeRootSignature(const void *pSrcData,
       IFT(E_FAIL);
       break;
     }
+#ifndef NO_EXCEPTION
   } catch(...) {
     DeleteRootSignature(pRootSignature);
     throw;
   }
+#endif
 
   *ppRootSignature = pRootSignature;
 }

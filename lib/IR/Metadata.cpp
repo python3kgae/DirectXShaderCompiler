@@ -365,17 +365,21 @@ MDString *MDString::get(LLVMContext &Context, StringRef Str) {
 
   auto *Entry =
       StringMapEntry<MDString>::Create(Str, Store.getAllocator(), MDString());
+#ifndef NO_EXCEPTION
   // HLSL Change Begin: Don't leak on insertion failure
   try {
+#endif
   bool WasInserted = Store.insert(Entry);
   (void)WasInserted;
   assert(WasInserted && "Expected entry to be inserted");
+#ifndef NO_EXCEPTION
   }
   catch (...) {
     Entry->Destroy();
     throw;
   }
   // HLSL Change End
+#endif
   Entry->second.Entry = Entry;
   return &Entry->second;
 }
@@ -717,7 +721,10 @@ MDTuple *MDTuple::getImpl(LLVMContext &Context, ArrayRef<Metadata *> MDs,
   } else {
     assert(ShouldCreate && "Expected non-uniqued nodes to always be created");
   }
-
+#ifdef NO_EXCEPTION
+  return storeImpl(new (MDs.size()) MDTuple(Context, Storage, Hash, MDs),
+                   Storage, Context.pImpl->MDTuples);
+#else
   // HLSL Change - guard with try/catch
   MDTuple *MDTuplePtr(new (MDs.size()) MDTuple(Context, Storage, Hash, MDs));
   MDTuple *Result;
@@ -728,6 +735,7 @@ MDTuple *MDTuple::getImpl(LLVMContext &Context, ArrayRef<Metadata *> MDs,
     throw;
   }
   return Result;
+#endif
 }
 
 void MDNode::deleteTemporary(MDNode *N) {

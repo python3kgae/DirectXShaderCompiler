@@ -181,16 +181,19 @@ void Value::setValueName(ValueName *VN) {
     HasName = false;
     return;
   }
-
+#ifndef NO_EXCEPTION
   // HLSL Change Begin: try/catch to not leak VN on exceptions
   try {
+#endif
   Ctx.pImpl->ValueNames[this] = VN;
+#ifndef NO_EXCEPTION
   }
   catch (...) {
     VN->Destroy();
     throw;
   }
   // HLSL Change End
+#endif
   HasName = true; // HLSL Change - only set this to true after assignment
 }
 

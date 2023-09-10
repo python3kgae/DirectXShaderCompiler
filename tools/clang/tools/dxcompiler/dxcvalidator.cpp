@@ -154,7 +154,9 @@ HRESULT STDMETHODCALLTYPE DxcValidator::ValidateWithDebug(
 
   HRESULT hr = S_OK;
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     LLVMContext Ctx;
     CComPtr<AbstractMemoryStream> pDiagStream;
     IFT(CreateMemoryStream(m_pMalloc, &pDiagStream));
@@ -170,8 +172,10 @@ HRESULT STDMETHODCALLTYPE DxcValidator::ValidateWithDebug(
                              Ctx, DiagStream, /*bLazyLoad*/ false));
     }
     return ValidateWithOptModules(pShader, Flags, nullptr, pDebugModule.get(), ppResult);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_ASSIGN_HRESULT();
+#endif
   return hr;
 }
 
@@ -187,7 +191,9 @@ HRESULT DxcValidator::ValidateWithOptModules(
   HRESULT validationStatus = S_OK;
   DxcEtw_DxcValidation_Start();
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<AbstractMemoryStream> pDiagStream;
     IFT(CreateMemoryStream(m_pMalloc, &pDiagStream));
 
@@ -211,9 +217,10 @@ HRESULT DxcValidator::ValidateWithOptModules(
         DxcOutputObject::ErrorOutput(CP_UTF8, // TODO Support DefaultTextCodePage
           (LPCSTR)pDiagBlob->GetBufferPointer(), pDiagBlob->GetBufferSize())
       }, ppResult));
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_ASSIGN_HRESULT();
-
+#endif
   DxcEtw_DxcValidation_Stop(SUCCEEDED(hr) ? validationStatus : hr);
   return hr;
 }
@@ -318,7 +325,9 @@ HRESULT DxcValidator::RunRootSignatureValidation(
     // Container has shader part, make sure we have PSV.
     IFRBOOL(pPSVPart, DXC_E_MISSING_PART);
   }
+#ifndef NO_EXCEPTION
   try {
+#endif
     RootSignatureHandle RSH;
     RSH.LoadSerialized((const uint8_t*)GetDxilPartData(pRSPart), pRSPart->PartSize);
     RSH.Deserialize();
@@ -334,10 +343,11 @@ HRESULT DxcValidator::RunRootSignatureValidation(
       IFRBOOL(VerifyRootSignature(RSH.GetDesc(), DiagStream, false),
               DXC_E_INCORRECT_ROOT_SIGNATURE);
     }
+#ifndef NO_EXCEPTION
   } catch(...) {
     return DXC_E_IR_VERIFICATION_FAILED;
   }
-
+#endif
   return S_OK;
 }
 
@@ -359,10 +369,14 @@ HRESULT RunInternalValidator(_In_ IDxcValidator *pValidator,
 }
 
 HRESULT CreateDxcValidator(_In_ REFIID riid, _Out_ LPVOID* ppv) {
+#ifndef NO_EXCEPTION
   try {
+#endif
       CComPtr<DxcValidator> result(DxcValidator::Alloc(DxcGetThreadMallocNoRef()));
       IFROOM(result.p);
       return result.p->QueryInterface(riid, ppv);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }

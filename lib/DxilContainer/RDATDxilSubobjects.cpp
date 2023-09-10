@@ -23,7 +23,9 @@ bool LoadSubobjectsFromRDAT(DxilSubobjects &subobjects, const RDAT::DxilRuntimeD
     return false;
   bool result = true;
   for (unsigned i = 0; i < table.Count(); ++i) {
+#ifndef NO_EXCEPTION
     try {
+#endif
       auto reader = table[i];
       DXIL::SubobjectKind kind = reader.getKind();
       bool bLocalRS = false;
@@ -80,10 +82,12 @@ bool LoadSubobjectsFromRDAT(DxilSubobjects &subobjects, const RDAT::DxilRuntimeD
           reader.getRaytracingPipelineConfig1().getFlags());
         break;
       }
+#ifndef NO_EXCEPTION
     }
     catch (hlsl::Exception &) {
       result = false;
     }
+#endif
   }
   return result;
 }

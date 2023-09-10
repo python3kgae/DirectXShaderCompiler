@@ -31,7 +31,11 @@ using namespace hlsl;
 LLVM_ATTRIBUTE_NORETURN static void ThrowExtensionError(StringRef Details)
 {
     std::string Msg = (Twine("Error in dxc extension api: ") + Details).str();
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_EXTENSION_ERROR, Msg);
+#else
+    assert(0 && Msg.c_str());
+#endif
 }
 
 // The lowering strategy format is a string that matches the following regex:

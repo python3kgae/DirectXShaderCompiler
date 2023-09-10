@@ -646,12 +646,16 @@ int __cdecl main(int argc, char **argv) {
 
   // Now that we have all of the passes ready, run them.
   // HLSL Change Starts - wrap in try-catch
+#ifndef NO_EXCEPTION
   try {
+#endif
     Passes.run(*M);
+#ifndef NO_EXCEPTION
   }
   catch(...) {
     exit(1);
   }
+#endif
   // HLSL Change Ends
 
   // Declare success.

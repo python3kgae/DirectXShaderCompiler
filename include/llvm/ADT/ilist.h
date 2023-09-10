@@ -420,6 +420,7 @@ public:
       Head = New;
     this->setPrev(CurNode, New);
 
+#ifndef NO_EXCEPTION
     // HLSL Change Begin: Undo insertion if exception
     try {
       this->addNodeToList(New);  // Notify traits that we added a node...
@@ -435,6 +436,7 @@ public:
       throw;
     }
     // HLSL Change End
+#endif
     return New;
   }
 

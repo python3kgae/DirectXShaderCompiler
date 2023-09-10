@@ -112,7 +112,11 @@ llvm::MemoryBuffer *ContentCache::getBuffer(DiagnosticsEngine &Diag,
     StringRef FillStr("<<<MISSING SOURCE FILE>>>\n");
     Buffer.setPointer(MemoryBuffer::getNewUninitMemBuffer(
                           ContentsEntry->getSize(), "<invalid>").release());
+#ifndef NO_EXCEPTION
     if (Buffer.getPointer() == nullptr) throw std::bad_alloc(); // HLSL Change
+#else
+    assert(Buffer.getPointer() != nullptr && "bad_alloc");
+#endif
     char *Ptr = const_cast<char*>(Buffer.getPointer()->getBufferStart());
     for (unsigned i = 0, e = ContentsEntry->getSize(); i != e; ++i)
       Ptr[i] = FillStr[i % FillStr.size()];

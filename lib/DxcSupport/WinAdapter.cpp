@@ -80,7 +80,11 @@ CHandle::operator HANDLE() const throw() { return m_h; }
 // CComBSTR
 CComBSTR::CComBSTR(_In_ int nSize, LPCWSTR sz) {
   if (nSize < 0) {
+#ifndef NO_EXCEPTION
     throw  std::invalid_argument("CComBSTR must have size >= 0");
+#else
+    assert(0 && "CComBSTR must have size >= 0");
+#endif
   }
 
   if (nSize == 0) {

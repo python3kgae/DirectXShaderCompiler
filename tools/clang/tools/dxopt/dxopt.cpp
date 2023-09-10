@@ -232,7 +232,9 @@ int main(int argc, const char **argv) {
   if (llvm::sys::fs::SetupPerThreadFileSystem())
     return 1;
   llvm::sys::fs::AutoCleanupPerThreadFileSystem auto_cleanup_fs;
+#ifndef NO_EXCEPTION
   try {
+#endif
     // Parse command line options.
     pStage = "Argument processing";
 
@@ -347,6 +349,7 @@ int main(int argc, const char **argv) {
       PrintOptOutput(outFileName, pOutputModule, pOutputText);
       break;
     }
+#ifndef NO_EXCEPTION
   } catch (const ::hlsl::Exception &hlslException) {
     try {
       const char *msg = hlslException.what();
@@ -372,6 +375,6 @@ int main(int argc, const char **argv) {
     printf("%s failed - unknown error.\n", pStage);
     return 1;
   }
-
+#endif
   return retVal;
 }

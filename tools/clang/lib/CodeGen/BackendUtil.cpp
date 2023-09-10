@@ -772,7 +772,7 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
 
   // HLSL Change - Support hierarchial time tracing.
   TimeTraceScope TimeScope("Backend", StringRef(""));
-
+#ifndef NO_EXCEPTION
   try { // HLSL Change Starts
     // Catch any fatal errors during optimization passes here
     // so that future passes can be skipped.
@@ -781,7 +781,9 @@ void clang::EmitBackendOutput(DiagnosticsEngine &Diags,
     Diags.Report(Diags.getCustomDiagID(DiagnosticsEngine::Error, "%0\n"))
         << StringRef(hlslException.what());
   } // HLSL Change Ends
-
+#else
+  AsmHelper.EmitAssembly(Action, OS);
+#endif
   // If an optional clang TargetInfo description string was passed in, use it to
   // verify the LLVM TargetMachine's DataLayout.
   if (AsmHelper.TM && !TDesc.empty()) {

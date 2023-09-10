@@ -136,8 +136,9 @@ void ConvertRootSignature(const DxilVersionedRootSignatureDesc * pRootSignatureI
   }
 
   DxilVersionedRootSignatureDesc *pRootSignatureOut = nullptr;
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     pRootSignatureOut = new DxilVersionedRootSignatureDesc();
     memset(pRootSignatureOut, 0, sizeof(*pRootSignatureOut));
 
@@ -183,12 +184,13 @@ void ConvertRootSignature(const DxilVersionedRootSignatureDesc * pRootSignatureI
       IFT(E_INVALIDARG);
       break;
     }
+#ifndef NO_EXCEPTION
   }
   catch (...) {
     DeleteRootSignature(pRootSignatureOut);
     throw;
   }
-
+#endif
   *ppRootSignatureOut = pRootSignatureOut;
 }
 

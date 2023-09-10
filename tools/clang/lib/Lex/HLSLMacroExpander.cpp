@@ -42,7 +42,11 @@ MacroExpander::MacroExpander(Preprocessor &PP_, unsigned options)
   std::unique_ptr<llvm::MemoryBuffer> SB = llvm::MemoryBuffer::getMemBuffer("", "<hlsl-semantic-defines>");
   if (!SB) {
     DXASSERT(false, "Cannot create macro expansion source buffer");
+  #ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_MACRO_EXPANSION_FAILURE);
+  #else
+    assert(0 && "DXC_E_MACRO_EXPANSION_FALURE");
+  #endif
   }
 
   // Unfortunately, there is no api in the SourceManager to lookup a
@@ -55,7 +59,11 @@ MacroExpander::MacroExpander(Preprocessor &PP_, unsigned options)
   m_expansionFileId = PP.getSourceManager().createFileID(std::move(SB));
   if (m_expansionFileId.isInvalid()) {
     DXASSERT(false, "Could not create FileID for macro expnasion?");
+  #ifndef NO_EXCEPTION
     throw hlsl::Exception(DXC_E_MACRO_EXPANSION_FAILURE);
+  #else
+    assert(0 && "DXC_E_MACRO_EXPANSION_FALURE");
+  #endif
   }
 }
 

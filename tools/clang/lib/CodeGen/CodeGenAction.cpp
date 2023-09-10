@@ -557,11 +557,13 @@ BackendConsumer::DxilDiagHandler(const llvm::DiagnosticInfoDxil &D) {
 
   // If no location information is available, add function name
   if (Loc.isInvalid()) {
+  // Disable for not enable rtti.
+  #ifndef NO_EXCEPTION
     auto *DiagClient = dynamic_cast<TextDiagnosticPrinter*>(Diags.getClient());
     auto *func = D.getFunction();
     if (DiagClient && func)
       DiagClient->setPrefix("Function: " + func->getName().str());
-    
+  #endif
     // Clang will de-duplicate this so that it only emits once.
     Diags.Report(
         Diags.getCustomDiagID(DiagnosticsEngine::Note,

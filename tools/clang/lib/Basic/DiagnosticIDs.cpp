@@ -681,6 +681,7 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
   }
 
   // Finally, report it.
+#ifndef NO_EXCEPTION
   // HLSL Change - guard bad_alloc with a fatal error report.
   try {
     EmitDiag(Diag, DiagLevel);
@@ -690,6 +691,9 @@ bool DiagnosticIDs::ProcessDiag(DiagnosticsEngine &Diag) const {
     Diag.ErrorOccurred = true;
     Diag.UnrecoverableErrorOccurred = true;
   }
+#else
+  EmitDiag(Diag, DiagLevel);
+#endif
   return true;
 }
 

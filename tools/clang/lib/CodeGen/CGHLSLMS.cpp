@@ -2687,6 +2687,7 @@ void CGMSHLSLRuntime::addSubobject(Decl *D) {
   }
 
   if (InitListExpr *initListExpr = dyn_cast<InitListExpr>(initExpr)) {
+#ifndef NO_EXCEPTION
     try {
       CreateSubobject(subobjKind, VD->getName(), initListExpr->getInits(), initListExpr->getNumInits(), hgType);
     } catch (hlsl::Exception&) {
@@ -2695,6 +2696,9 @@ void CGMSHLSLRuntime::addSubobject(Decl *D) {
       Diags.Report(initExpr->getLocStart(), DiagID);
       return;
     }
+#else
+    CreateSubobject(subobjKind, VD->getName(), initListExpr->getInits(), initListExpr->getNumInits(), hgType);
+#endif
   }
   else {
     DiagnosticsEngine &Diags = CGM.getDiags();

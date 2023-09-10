@@ -49,15 +49,19 @@ public:
     _In_ LPCWSTR pFilename,                                   // Candidate filename.
     _COM_Outptr_result_maybenull_ IDxcBlob **ppIncludeSource  // Resultant source object for included file, nullptr if not found.
     ) override {
+#ifndef NO_EXCEPTION
     try {
+#endif
       CComPtr<IDxcBlobEncoding> pEncoding;
       HRESULT hr = ::hlsl::DxcCreateBlobFromFile(m_pMalloc, pFilename, nullptr, &pEncoding);
       if (SUCCEEDED(hr)) {
         *ppIncludeSource = pEncoding.Detach();
       }
       return hr;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 };
 
@@ -96,33 +100,43 @@ public:
     _In_ UINT32 argCount                                // Number of arguments to add
   ) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
+#endif
       for (UINT32 i = 0; i < argCount; ++i) {
         AddArgument(pArguments[i]);
       }
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
   HRESULT STDMETHODCALLTYPE AddArgumentsUTF8(
     _In_opt_count_(argCount)LPCSTR *pArguments,         // Array of pointers to UTF-8 arguments to add
     _In_ UINT32 argCount                                // Number of arguments to add
   ) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
+#endif
       for (UINT32 i = 0; i < argCount; ++i) {
         AddArgument(CA2W(pArguments[i]));
       }
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
   HRESULT STDMETHODCALLTYPE AddDefines(
       _In_count_(defineCount) const DxcDefine *pDefines, // Array of defines
       _In_ UINT32 defineCount                            // Number of defines
   ) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
+#endif
       for (UINT32 i = 0; i < defineCount; ++i) {
         LPCWSTR Name = pDefines[i].Name;
         LPCWSTR Value = pDefines[i].Value;
@@ -142,8 +156,10 @@ public:
         AddArgument(defineArg.c_str());
       }
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   // This is used by BuildArguments to skip extra entry/profile arguments in the
@@ -237,40 +253,56 @@ public:
   HRESULT STDMETHODCALLTYPE CreateBlobFromBlob(
     _In_ IDxcBlob *pBlob, UINT32 offset, UINT32 length, _COM_Outptr_ IDxcBlob **ppResult) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::DxcCreateBlobFromBlob(pBlob, offset, length, ppResult);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::DxcCreateBlobFromBlob(pBlob, offset, length, ppResult);
+#endif
   }
 
   HRESULT STDMETHODCALLTYPE CreateBlobFromPinned(
     _In_bytecount_(size) LPCVOID pData, UINT32 size, UINT32 codePage,
     _COM_Outptr_ IDxcBlobEncoding **pBlobEncoding) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::DxcCreateBlobWithEncodingFromPinned(pData, size, codePage, pBlobEncoding);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::DxcCreateBlobWithEncodingFromPinned(pData, size, codePage, pBlobEncoding);
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE MoveToBlob(
     _In_bytecount_(size) LPCVOID pData, IMalloc *pIMalloc, UINT32 size, UINT32 codePage,
     _COM_Outptr_ IDxcBlobEncoding **pBlobEncoding) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::DxcCreateBlobWithEncodingOnMalloc(pData, pIMalloc, size, codePage, pBlobEncoding);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::DxcCreateBlobWithEncodingOnMalloc(pData, pIMalloc, size, codePage, pBlobEncoding);
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE CreateBlob(
     _In_bytecount_(size) LPCVOID pData, UINT32 size, UINT32 codePage,
     _COM_Outptr_ IDxcBlobEncoding **pBlobEncoding) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::DxcCreateBlobWithEncodingOnHeapCopy(pData, size, codePage, pBlobEncoding);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::DxcCreateBlobWithEncodingOnHeapCopy(pData, size, codePage, pBlobEncoding);
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE LoadFile(
@@ -283,10 +315,14 @@ public:
   HRESULT STDMETHODCALLTYPE CreateReadOnlyStreamFromBlob(
     _In_ IDxcBlob *pBlob, _COM_Outptr_ IStream **ppStream) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::CreateReadOnlyBlobStream(pBlob, ppStream);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::CreateReadOnlyBlobStream(pBlob, ppStream);
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE CreateDefaultIncludeHandler(
@@ -310,10 +346,14 @@ public:
   virtual HRESULT STDMETHODCALLTYPE GetBlobAsWide(
     _In_ IDxcBlob *pBlob, _COM_Outptr_ IDxcBlobWide **pBlobEncoding) override {
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
       return ::hlsl::DxcGetBlobAsWide(pBlob, m_pMalloc, pBlobEncoding);
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    return ::hlsl::DxcGetBlobAsWide(pBlob, m_pMalloc, pBlobEncoding);
+#endif
   }
 
 
@@ -345,7 +385,9 @@ public:
       return E_INVALIDARG;
 
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
+#endif
       CComPtr<IDxcBlob> pPdbContainerBlob;
       const DxilPartHeader *pModulePart = nullptr;
       const DxilPartHeader *pRDATPart = nullptr;
@@ -424,8 +466,10 @@ public:
       }
 
       return hlsl::CreateDxilShaderOrLibraryReflectionFromModulePart(pModulePart, pRDATPart, iid, ppvReflection);
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE BuildArguments(
@@ -440,8 +484,9 @@ public:
     _COM_Outptr_ IDxcCompilerArgs **ppArgs        // Arguments you can use with Compile() method
   ) override {
     DxcThreadMalloc TM(m_pMalloc);
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       CComPtr<DxcCompilerArgs> pArgs = DxcCompilerArgs::Alloc(m_pMalloc);
       if (!pArgs)
         return E_OUTOFMEMORY;
@@ -475,8 +520,10 @@ public:
 
       *ppArgs = pArgs.Detach();
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   virtual HRESULT STDMETHODCALLTYPE
@@ -484,14 +531,17 @@ public:
                  _COM_Outptr_ IDxcBlob **ppContainer) override
   {
     DxcThreadMalloc TM(m_pMalloc);
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       CComPtr<IStream> pStream;
       IFR(hlsl::CreateReadOnlyBlobStream(pPDBBlob, &pStream));
       IFR(hlsl::pdb::LoadDataFromStream(m_pMalloc, pStream, ppHash, ppContainer));
       return S_OK;
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
 };

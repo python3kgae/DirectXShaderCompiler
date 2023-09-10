@@ -31,7 +31,9 @@ using namespace hlsl;
 
 HRESULT STDMETHODCALLTYPE DxcContainerBuilder::Load(_In_ IDxcBlob *pSource) {
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     IFTBOOL(m_pContainer == nullptr && pSource != nullptr &&
       IsDxilContainerLike(pSource->GetBufferPointer(),
         pSource->GetBufferSize()),
@@ -45,14 +47,18 @@ HRESULT STDMETHODCALLTYPE DxcContainerBuilder::Load(_In_ IDxcBlob *pSource) {
       AddPart(DxilPart(pPartHeader->PartFourCC, pBlob));
     }
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 
 HRESULT STDMETHODCALLTYPE DxcContainerBuilder::AddPart(_In_ UINT32 fourCC, _In_ IDxcBlob *pSource) {
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     IFTBOOL(pSource != nullptr && !IsDxilContainerLike(pSource->GetBufferPointer(),
       pSource->GetBufferSize()),
       E_INVALIDARG);
@@ -68,13 +74,17 @@ HRESULT STDMETHODCALLTYPE DxcContainerBuilder::AddPart(_In_ UINT32 fourCC, _In_ 
       m_RequireValidation = true;
     }
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 HRESULT STDMETHODCALLTYPE DxcContainerBuilder::RemovePart(_In_ UINT32 fourCC) {
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     IFTBOOL(fourCC == DxilFourCC::DFCC_ShaderDebugInfoDXIL ||
                 fourCC == DxilFourCC::DFCC_ShaderDebugName ||
                 fourCC == DxilFourCC::DFCC_RootSignature ||
@@ -90,13 +100,17 @@ HRESULT STDMETHODCALLTYPE DxcContainerBuilder::RemovePart(_In_ UINT32 fourCC) {
       m_HasPrivateData = false;
     }
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 HRESULT STDMETHODCALLTYPE DxcContainerBuilder::SerializeContainer(_Out_ IDxcOperationResult **ppResult) {
   DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
   try {
+#endif
     // Allocate memory for new dxil container.
     uint32_t ContainerSize = ComputeContainerSize();
     CComPtr<AbstractMemoryStream> pMemoryStream;
@@ -156,8 +170,10 @@ HRESULT STDMETHODCALLTYPE DxcContainerBuilder::SerializeContainer(_Out_ IDxcOper
         DxcOutputObject::DataOutput(DXC_OUT_ERRORS, pErrorBlob, DxcOutNoName)
       }, ppResult));
     return S_OK;
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
 
 UINT32 DxcContainerBuilder::ComputeContainerSize() {

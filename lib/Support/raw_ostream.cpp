@@ -790,7 +790,7 @@ raw_ostream &llvm::nulls() {
 //===----------------------------------------------------------------------===//
 
 raw_string_ostream::~raw_string_ostream() {
-#if 0 // HLSL Change Starts
+#ifdef NO_EXCEPTION // HLSL Change Starts
   flush();
 #else
   // C++ and exception in destructors don't play nice. The proper pattern

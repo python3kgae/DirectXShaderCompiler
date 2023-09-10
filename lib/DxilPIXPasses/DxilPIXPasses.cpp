@@ -25,11 +25,15 @@ using namespace hlsl;
 namespace hlsl {
 
 HRESULT SetupRegistryPassForPIX() {
+#ifndef NO_EXCEPTION
   try {
+#endif
     PassRegistry &Registry = *PassRegistry::getPassRegistry();
 #include "DxilPIXPasses.inc"
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
   return S_OK;
 }
 

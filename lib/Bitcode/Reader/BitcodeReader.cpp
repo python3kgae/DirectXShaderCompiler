@@ -5119,6 +5119,7 @@ ErrorOr<std::unique_ptr<Module>> llvm::getStreamedBitcodeModule(
                               false);
 }
 
+#ifndef NO_EXCEPTION
 // HLSL Change Starts
 struct report_fatal_error_data {
   report_fatal_error_data(DiagnosticHandlerFunction DH)
@@ -5134,17 +5135,20 @@ void report_fatal_error_handler(void *user_datam, const std::string &reason,
   throw std::runtime_error("Invalid bitcode");
 }
 // HLSL Change Ends
+#endif
 
 ErrorOr<std::unique_ptr<Module>>
 llvm::parseBitcodeFile(MemoryBufferRef Buffer, LLVMContext &Context,
                        DiagnosticHandlerFunction DiagnosticHandler,
                        bool ShouldTrackBitstreamUsage) // HLSL Change
 {
+#ifndef NO_EXCEPTION
   // HLSL Change Starts - introduce a ScopedFatalErrorHandler to handle
   // report_fatal_error from readers.
   report_fatal_error_data data(DiagnosticHandler);
   ScopedFatalErrorHandler SFE(report_fatal_error_handler, &data);
   // HLSL Change Ends
+#endif
   std::unique_ptr<MemoryBuffer> Buf = MemoryBuffer::getMemBuffer(Buffer, false);
   return getLazyBitcodeModuleImpl(std::move(Buf), Context, true,
                                   DiagnosticHandler,

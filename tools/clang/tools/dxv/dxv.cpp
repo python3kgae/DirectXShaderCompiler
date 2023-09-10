@@ -136,7 +136,9 @@ int main(int argc, const char **argv) {
   llvm::sys::fs::AutoCleanupPerThreadFileSystem auto_cleanup_fs;
   if (FAILED(DxcInitThreadMalloc())) return 1;
   DxcSetThreadMallocToDefault();
+#ifndef NO_EXCEPTION
   try {
+#endif
     llvm::sys::fs::MSFileSystem *msfPtr;
     IFT(CreateMSFileSystemForDisk(&msfPtr));
     std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -160,6 +162,7 @@ int main(int argc, const char **argv) {
     DxvContext context(dxcSupport);
     pStage = "Validation";
     context.Validate();
+#ifndef NO_EXCEPTION
   } catch (const ::hlsl::Exception &hlslException) {
     try {
       const char *msg = hlslException.what();
@@ -184,6 +187,6 @@ int main(int argc, const char **argv) {
     printf("%s failed - unknown error.\n", pStage);
     return 1;
   }
-
+#endif
   return 0;
 }

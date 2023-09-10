@@ -532,10 +532,14 @@ HRESULT RootSignatureParser::Error(uint32_t uErrorNum, LPCSTR pError, ...)
     va_start(Args, pError);
     vsnprintf_s(msg, _countof(msg), pError, Args);
     va_end(Args);
+#ifndef NO_EXCEPTION
     try {
       m_OS << msg;
     }
     CATCH_CPP_RETURN_HRESULT();
+#else
+    m_OS << msg;
+#endif
     return E_FAIL;
 }
 
@@ -659,10 +663,14 @@ HRESULT RootSignatureParser::ParseRootSignature(DxilVersionedRootSignatureDesc *
     if(pRS->Version != m_Version)
     {
         DxilVersionedRootSignatureDesc *pRS1 = NULL;
+#ifndef NO_EXCEPTION
         try {
           hlsl::ConvertRootSignature(pRS, m_Version, const_cast<const DxilVersionedRootSignatureDesc **>(&pRS1));
         }
         CATCH_CPP_ASSIGN_HRESULT();
+#else
+        hlsl::ConvertRootSignature(pRS, m_Version, const_cast<const DxilVersionedRootSignatureDesc **>(&pRS1));
+#endif
         IFC(hr);
         hlsl::DeleteRootSignature(pRS);
         pRS = pRS1;

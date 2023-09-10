@@ -41,7 +41,11 @@ using namespace hlsl::DXIL::OperandIndex;
 
 void ThrowIf(bool a) {
   if (a) {
+#ifndef NO_EXCEPTION
     throw ::hlsl::Exception(E_INVALIDARG);
+#else
+    assert(0 && "E_INVALIDARG");
+#endif
   }
 }
 
@@ -114,7 +118,11 @@ static uint32_t OffsetFromAccess(ShaderAccessFlags access) {
   case ShaderAccessFlags::Counter:
     return 2;
   default:
+#ifndef NO_EXCEPTION
     throw ::hlsl::Exception(E_INVALIDARG);
+#else
+    assert(0 && "E_INVALIDARG");
+#endif
   }
 }
 

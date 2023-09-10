@@ -656,8 +656,11 @@ std::pair<Offset,Offset> PTHWriter::EmitIdentifierTable() {
 
   // Note that we use 'calloc', so all the bytes are 0.
   PTHIdKey *IIDMap = (PTHIdKey*)calloc(idcount, sizeof(PTHIdKey));
+#ifndef NO_EXCEPTION
   if (IIDMap == nullptr) throw std::bad_alloc(); // HLSL Change
-
+#else
+  assert(IIDMap != nullptr && "bad alloc");
+#endif
   // Create the hashtable.
   llvm::OnDiskChainedHashTableGenerator<PTHIdentifierTableTrait> IIOffMap;
 

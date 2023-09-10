@@ -242,7 +242,11 @@ std::string BlobToUtf8(_In_ IDxcBlob *pBlob) {
   UINT32 codePage;
   IFT(pBlobEncoding->GetEncoding(&known, &codePage));
   if (!known) {
+#ifndef NO_EXCEPTION
     throw std::runtime_error("unknown codepage for blob.");
+#else
+    assert(0 && "unknown codepage for blob.");
+#endif
   }
   std::string result;
   if (codePage == DXC_CP_WIDE) {
@@ -261,7 +265,11 @@ std::string BlobToUtf8(_In_ IDxcBlob *pBlob) {
     memcpy(&result[0], text, length);
     return result;
   } else {
+#ifndef NO_EXCEPTION
     throw std::runtime_error("Unsupported codepage.");
+#else
+    assert(0 && "Unsupported codepage");
+#endif
   }
 }
 
@@ -277,7 +285,11 @@ std::wstring BlobToWide(_In_ IDxcBlob *pBlob) {
   UINT32 codePage;
   IFT(pBlobEncoding->GetEncoding(&known, &codePage));
   if (!known) {
+#ifndef NO_EXCEPTION
     throw std::runtime_error("unknown codepage for blob.");
+#else
+    assert(0 && "unknown codepage for blob.");
+#endif
   }
   std::wstring result;
   if (codePage == DXC_CP_WIDE) {
@@ -296,7 +308,11 @@ std::wstring BlobToWide(_In_ IDxcBlob *pBlob) {
     Unicode::UTF8ToWideString(text, length, &result);
     return result;
   } else {
+#ifndef NO_EXCEPTION
     throw std::runtime_error("Unsupported codepage.");
+#else
+    assert(0 && "Unsupported codepage.");
+#endif
   }
 }
 

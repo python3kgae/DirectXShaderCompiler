@@ -1120,9 +1120,12 @@ DiagnosticsEngine &ASTContext::getDiagnostics() const {
 AttrVec& ASTContext::getDeclAttrs(const Decl *D) {
   AttrVec *&Result = DeclAttrs[D];
   if (!Result) {
+#ifndef NO_EXCEPTION
     try { // HLSL Change
+#endif
     void *Mem = Allocate(sizeof(AttrVec));
     Result = new (Mem) AttrVec;
+#ifndef NO_EXCEPTION
     // HLSL Change Begin: Don't leave empty entry on exception
     }
     catch (...) {
@@ -1130,6 +1133,7 @@ AttrVec& ASTContext::getDeclAttrs(const Decl *D) {
       throw;
     }
     // HLSL Change End
+#endif
   }
     
   return *Result;

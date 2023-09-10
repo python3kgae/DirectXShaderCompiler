@@ -513,7 +513,11 @@ void Preprocessor::EnterMainSourceFile() {
   // Preprocess Predefines to populate the initial preprocessor state.
   std::unique_ptr<llvm::MemoryBuffer> SB =
     llvm::MemoryBuffer::getMemBufferCopy(Predefines, "<built-in>");
+#ifndef NO_EXCEPTION
   if (SB.get() == nullptr) throw std::bad_alloc(); // HLSL Change
+#else
+  if (SB.get() == nullptr) assert(0 && "bad alloc"); // HLSL Change
+#endif
   assert(SB && "Cannot create predefined source buffer");
   FileID FID = SourceMgr.createFileID(std::move(SB));
   assert(!FID.isInvalid() && "Could not create FileID for predefines?");

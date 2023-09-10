@@ -478,8 +478,12 @@ static HRESULT CodePageBufferToUtf8(UINT32 codePage, LPCVOID bufferPointer,
   const WCHAR *wideChars = nullptr;
   if (codePage == DXC_CP_WIDE) {
     if (!IsSizeWcharAligned(bufferSize))
+#ifndef NO_EXCEPTION
       throw hlsl::Exception(DXC_E_STRING_ENCODING_FAILED,
                             "Error in encoding argument specified");
+#else
+      assert(0 && "Error in encoding argument specified");
+#endif
     wideChars = (const WCHAR*)bufferPointer;
     wideCharCount = bufferSize / sizeof(wchar_t);
   } else if (bufferSize) {

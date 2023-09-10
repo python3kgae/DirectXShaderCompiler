@@ -111,14 +111,18 @@ def writeDxcOptimizer(args):
   out.write('\n'.join([
     'namespace hlsl {',
     'HRESULT SetupRegistryPassForHLSL() {',
+    '#ifndef NO_EXCEPTION',
     '  try {',
+    '#endif',
     '    PassRegistry &Registry = *PassRegistry::getPassRegistry();\n']))
   out.write(get_init_passes(set(["llvm", "dxil_gen"])))
   out.write('\n'.join([
     '    // Not schematized - exclusively for compiler authors.',
     '    initializeCFGPrinterPasses(Registry);',
+    '#ifndef NO_EXCEPTION',
     '  }',
     '  CATCH_CPP_RETURN_HRESULT();',
+    '#endif',
     '  return S_OK;',
     '}',
     '} // namespace hlsl\n',

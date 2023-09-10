@@ -289,12 +289,16 @@ TEST_F(OptionsTest, ConvertWhenFailThenThrow) {
 
   // Throw on failure.
   bool thrown = false;
+#ifndef NO_EXCEPTION
   try {
     Unicode::UTF8ToWideStringOrThrow("\xC3");
   }
   catch (...) {
     thrown = true;
   }
+#else
+  Unicode::UTF8ToWideStringOrThrow("\xC3");
+#endif
   EXPECT_EQ(true, thrown);
 }
 

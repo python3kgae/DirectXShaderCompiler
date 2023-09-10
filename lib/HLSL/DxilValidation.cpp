@@ -2292,16 +2292,20 @@ static void ValidateExternalFunction(Function *F, ValidationContext &ValCtx) {
     }
     else {
       Type *Ty = OP::GetOverloadType(dxilOpcode, CI->getCalledFunction());
+#ifndef NO_EXCEPTION
       try {
+#endif
         if (!hlslOP->IsOverloadLegal(dxilOpcode, Ty)) {
           ValCtx.EmitInstrError(CI, ValidationRule::InstrOload);
           continue;
         }
+#ifndef NO_EXCEPTION
       }
       catch (...) {
         ValCtx.EmitInstrError(CI, ValidationRule::InstrOload);
         continue;
       }
+#endif
       dxilFunc = hlslOP->GetOpFunc(dxilOpcode, Ty->getScalarType());
     }
 
@@ -5822,7 +5826,9 @@ HRESULT ValidateDxilContainerParts(llvm::Module *pModule,
       if (pRootSignaturePart) {
         std::string diagStr;
         raw_string_ostream DiagStream(diagStr);
+#ifndef NO_EXCEPTION
         try {
+#endif
           RootSignatureHandle RS;
           RS.LoadSerialized((const uint8_t*)GetDxilPartData(pRootSignaturePart), pRootSignaturePart->PartSize);
           RS.Deserialize();
@@ -5831,10 +5837,12 @@ HRESULT ValidateDxilContainerParts(llvm::Module *pModule,
                                                    GetDxilPartData(pPSVPart), pPSVPart->PartSize,
                                                    DiagStream),
                   DXC_E_INCORRECT_ROOT_SIGNATURE);
+#ifndef NO_EXCEPTION
         } catch (...) {
           ValCtx.EmitError(ValidationRule::ContainerRootSignatureIncompatible);
           emitDxilDiag(pModule->getContext(), DiagStream.str().c_str());
         }
+#endif
       }
     } else {
       ValCtx.EmitFormatError(ValidationRule::ContainerPartMissing, {"Pipeline State Validation"});
@@ -5939,7 +5947,9 @@ HRESULT ValidateDxilBitcode(
     pOutputStream->Reserve(pWriter->size());
     pWriter->write(pOutputStream);
     DxilVersionedRootSignature desc;
+#ifndef NO_EXCEPTION
     try {
+#endif
       DeserializeRootSignature(SerializedRootSig.data(),
                                SerializedRootSig.size(), desc.get_address_of());
       if (!desc.get()) {
@@ -5949,9 +5959,11 @@ HRESULT ValidateDxilBitcode(
                                                dxilModule.GetShaderModel()->GetKind(),
                                                pOutputStream->GetPtr(), pWriter->size(),
                                                DiagStream), DXC_E_INCORRECT_ROOT_SIGNATURE);
+#ifndef NO_EXCEPTION
     } catch (...) {
       return DXC_E_INCORRECT_ROOT_SIGNATURE;
     }
+#endif
   }
 
   if (DiagContext.HasErrors() || DiagContext.HasWarnings()) {

@@ -102,8 +102,16 @@ void DxcCallDestructor(T *obj) {
 template <typename T, typename... Args>
 inline T *CreateOnMalloc(IMalloc * pMalloc, Args&&... args) {
   void *P = pMalloc->Alloc(sizeof(T));
+#ifndef NO_EXCEPTION
   try { if (P) new (P)T(pMalloc, std::forward<Args>(args)...); }
   catch (...) { pMalloc->Free(P); throw; }
+#else
+  if (P) new (P)T(pMalloc, std::forward<Args>(args)...);
+  else {
+    pMalloc->Free(P);
+    assert(0);
+  }
+#endif
   return (T *)P;
 }
 
@@ -131,6 +139,8 @@ inline T *CreateOnMalloc(IMalloc * pMalloc, Args&&... args) {
   DXC_MICROCOM_TM_ALLOC(T)
 #define DXC_MICROCOM_TM_CTOR_ONLY(T)                                           \
   T(IMalloc *pMalloc) : m_dwRef(0), m_pMalloc(pMalloc) {}
+
+#ifndef NO_EXCEPTION
 #define DXC_MICROCOM_TM_ALLOC(T)                                               \
   template <typename... Args>                                                  \
   static T *Alloc(IMalloc *pMalloc, Args &&... args) {                         \
@@ -144,6 +154,20 @@ inline T *CreateOnMalloc(IMalloc * pMalloc, Args&&... args) {
     }                                                                          \
     return (T *)P;                                                             \
   }
+#else
+#define DXC_MICROCOM_TM_ALLOC(T)                                               \
+  template <typename... Args>                                                  \
+  static T *Alloc(IMalloc *pMalloc, Args &&... args) {                         \
+    void *P = pMalloc->Alloc(sizeof(T));                                       \
+      if (P)                                                                   \
+        new (P) T(pMalloc, std::forward<Args>(args)...);                       \
+      else {                                                                   \
+        pMalloc->Free(P);                                                      \
+        assert(0 && "Alloc fail");                                             \
+      }                                                                        \
+    return (T *)P;                                                             \
+  }
+#endif
 
 /// <summary>
 /// Provides a QueryInterface implementation for a class that supports

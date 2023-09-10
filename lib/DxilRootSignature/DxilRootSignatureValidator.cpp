@@ -841,29 +841,36 @@ bool VerifyRootSignatureWithShaderPSV(const DxilVersionedRootSignatureDesc *pDes
                                       const void *pPSVData,
                                       uint32_t PSVSize,
                                       llvm::raw_ostream &DiagStream) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     RootSignatureVerifier RSV;
     DiagnosticPrinterRawOStream DiagPrinter(DiagStream);
     RSV.VerifyRootSignature(pDesc, DiagPrinter);
     RSV.VerifyShader(GetVisibilityType(ShaderKind), pPSVData, PSVSize, DiagPrinter);
+#ifndef NO_EXCEPTION
   } catch (...) {
     return false;
   }
-
+#endif
   return true;
 }
 
 bool VerifyRootSignature(_In_ const DxilVersionedRootSignatureDesc *pDesc,
                          _In_ llvm::raw_ostream &DiagStream,
                          _In_ bool bAllowReservedRegisterSpace) {
+#ifndef NO_EXCEPTION
   try {
+#endif
     RootSignatureVerifier RSV;
     RSV.AllowReservedRegisterSpace(bAllowReservedRegisterSpace);
     DiagnosticPrinterRawOStream DiagPrinter(DiagStream);
     RSV.VerifyRootSignature(pDesc, DiagPrinter);
+#ifndef NO_EXCEPTION
   } catch (...) {
     return false;
   }
+#endif
 
   return true;
 }

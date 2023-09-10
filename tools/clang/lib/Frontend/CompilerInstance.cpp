@@ -597,7 +597,11 @@ void CompilerInstance::clearOutputFiles(bool EraseFiles) {
   }
   OutputFiles.clear();
   NonSeekStream.reset();
+#ifndef NO_EXCEPTION
   if (errorsFound) throw std::runtime_error("errors when processing output"); // HLSL Change
+#else
+  if (errorsFound) assert(0 && "errors when processing output");
+#endif
 }
 
 raw_pwrite_stream *

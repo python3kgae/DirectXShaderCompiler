@@ -606,7 +606,11 @@ void SetupCompilerForRewrite(
   const FileEntry *mainFileEntry =
       compiler.getFileManager().getFile(StringRef(pMainFile));
   if (mainFileEntry == nullptr) {
+#ifndef NO_EXCEPTION
     throw ::hlsl::Exception(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+#else
+    assert(0 && "file not found");
+#endif
   }
   compiler.getSourceManager().setMainFileID(
       compiler.getSourceManager().createFileID(mainFileEntry, SourceLocation(),
@@ -1277,19 +1281,23 @@ HRESULT preprocessRewrittenFiles(
   compiler.getFrontendOpts().OutputFile = "output.bc";
   compiler.WriteDefaultOutputDirectly = true;
   compiler.setOutStream(&outStream);
+#ifndef NO_EXCEPTION
   try {
+#endif
     PreprocessResult(compiler, pFileName);
     StringRef out((char *)pOutputStream.p->GetPtr(),
                   pOutputStream.p->GetPtrSize());
     o << out;
     compiler.setSourceManager(nullptr);
     msfPtr->UnRegisterOutputStream();
+#ifndef NO_EXCEPTION
   } catch (Exception &exp) {
     w << exp.msg;
     return E_FAIL;
   } catch (...) {
     return E_FAIL;
   }
+#endif
   return S_OK;
 }
 
@@ -1584,8 +1592,9 @@ public:
     IFR(hlsl::DxcGetBlobAsUtf8(pSource, m_pMalloc, &utf8Source));
 
     LPCSTR fakeName = "input.hlsl";
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       ::llvm::sys::fs::MSFileSystem* msfPtr;
       IFT(CreateMSFileSystemForDisk(&msfPtr));
       std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -1611,8 +1620,10 @@ public:
           DxcOutputObject::ErrorOutput(CP_UTF8,   // TODO Support DefaultTextCodePage
             errors.c_str())
         }, ppResult);
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
   HRESULT STDMETHODCALLTYPE 
@@ -1631,8 +1642,9 @@ public:
     IFR(hlsl::DxcGetBlobAsUtf8(pSource, m_pMalloc, &utf8Source));
 
     LPCSTR fakeName = "input.hlsl";
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       ::llvm::sys::fs::MSFileSystem* msfPtr;
       IFT(CreateMSFileSystemForDisk(&msfPtr));
       std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -1656,9 +1668,10 @@ public:
             rewrite.c_str(), DxcOutNoName),
           DxcOutputObject::ErrorOutput(opts.DefaultTextCodePage, errors.c_str())
         }, ppResult);
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
-
+#endif
   }
 
   HRESULT STDMETHODCALLTYPE RewriteUnchangedWithInclude(
@@ -1682,8 +1695,9 @@ public:
 
     CW2A utf8SourceName(pSourceName, CP_UTF8);
     LPCSTR fName = utf8SourceName.m_psz;
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       dxcutil::DxcArgsFileSystem *msfPtr = dxcutil::CreateDxcArgsFileSystem(utf8Source, pSourceName, pIncludeHandler);
       std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
       ::llvm::sys::fs::AutoPerThreadSystem pts(msf.get());
@@ -1714,9 +1728,10 @@ public:
             rewrite.c_str(), DxcOutNoName),
           DxcOutputObject::ErrorOutput(opts.DefaultTextCodePage, errors.c_str())
         }, ppResult);
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
-
+#endif
   }
 
     HRESULT STDMETHODCALLTYPE RewriteWithOptions(
@@ -1745,8 +1760,9 @@ public:
 
     CW2A utf8SourceName(pSourceName, CP_UTF8);
     LPCSTR fName = utf8SourceName.m_psz;
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       dxcutil::DxcArgsFileSystem *msfPtr = dxcutil::CreateDxcArgsFileSystem(
           utf8Source, pSourceName, pIncludeHandler);
       std::unique_ptr<::llvm::sys::fs::MSFileSystem> msf(msfPtr);
@@ -1801,8 +1817,10 @@ public:
             rewrite.c_str(), DxcOutNoName),
           DxcOutputObject::ErrorOutput(opts.DefaultTextCodePage, errors.c_str())
         }, ppResult);
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
+#endif
   }
 
 };

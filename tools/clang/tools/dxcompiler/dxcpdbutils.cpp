@@ -823,8 +823,9 @@ public:
 
     if (!pPdbOrDxil)
       return E_POINTER;
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       DxcThreadMalloc TM(m_pMalloc);
 
       ::llvm::sys::fs::MSFileSystem *msfPtr = nullptr;
@@ -875,9 +876,10 @@ public:
       }
 
       IFR(SetEntryPointToDefaultIfEmpty());
+#ifndef NO_EXCEPTION
     }
     CATCH_CPP_RETURN_HRESULT();
-
+#endif
     return S_OK;
   }
 

@@ -67,7 +67,11 @@ inline static bool wcsstartswith(LPCWSTR value, LPCWSTR prefix) {
 static void FatalErrorHandlerStreamWrite(void *user_data, const std::string& reason, bool gen_crash_diag) {
   raw_ostream *OS = (raw_ostream *)user_data;
   *OS << reason;
+#ifndef NO_EXCEPTION
   throw std::exception();
+#else
+  assert(0);
+#endif
 }
 
 static HRESULT Utf8ToWideCoTaskMalloc(LPCSTR pValue, LPWSTR *ppResult) {
@@ -187,7 +191,9 @@ public:
 };
 
 HRESULT DxcOptimizer::Initialize() {
+#ifndef NO_EXCEPTION
   try {
+#endif
     m_registry = PassRegistry::getPassRegistry();
 
     struct PRL : public PassRegistrationListener {
@@ -200,8 +206,10 @@ HRESULT DxcOptimizer::Initialize() {
     PRL prl;
     prl.Passes = &this->m_passes;
     m_registry->enumerateWith(&prl);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
   return S_OK;
 }
 
@@ -237,9 +245,9 @@ HRESULT STDMETHODCALLTYPE DxcOptimizer::RunOptimizer(
     return E_POINTER;
 
   DxcThreadMalloc TM(m_pMalloc);
-
+#ifndef NO_EXCEPTION
   try {
-
+#endif
     // Setup input buffer.
     //
     // The ir parsing requires the buffer to be null terminated. We deal with
@@ -550,9 +558,10 @@ HRESULT STDMETHODCALLTYPE DxcOptimizer::RunOptimizer(
       }
       IFT(pProgramStream.QueryInterface(ppOutputModule));
     }
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
-
+#endif
   return S_OK;
 }
 

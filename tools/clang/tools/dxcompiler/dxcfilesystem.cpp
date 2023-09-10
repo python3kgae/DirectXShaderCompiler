@@ -406,7 +406,11 @@ public:
     const std::vector<clang::HeaderSearchOptions::Entry> &entries =
       compiler.getHeaderSearchOpts().UserEntries;
     if (entries.size() > MaxIncludedFiles) {
+#ifndef NO_EXCEPTION
       throw hlsl::Exception(HRESULT_FROM_WIN32(ERROR_OUT_OF_STRUCTURES));
+#else
+    assert(0 && "error: out of structures");
+#endif
     }
     for (unsigned i = 0, e = entries.size(); i != e; ++i) {
       const clang::HeaderSearchOptions::Entry &E = entries[i];

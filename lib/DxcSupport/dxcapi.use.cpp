@@ -67,7 +67,11 @@ void IFT_Data(HRESULT hr, LPCWSTR data) {
   if (data != nullptr) {
     errMsg.append(pData);
   }
+#ifndef NO_EXCEPTION
   throw ::hlsl::Exception(hr, errMsg);
+#else
+  assert(0 && errMsg.c_str());
+#endif
 }
 
 void EnsureEnabled(DxcDllSupport &dxcSupport) {
@@ -122,7 +126,11 @@ static void WriteWideNullTermToConsole(_In_opt_count_(charCount) const wchar_t *
     fprintf(stderr, "%s\n", consoleMessage.c_str());
   }
   else {
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(E_INVALIDARG);
+#else
+    assert(0 && "E_INVALIDARG");
+#endif
   }
 }
 

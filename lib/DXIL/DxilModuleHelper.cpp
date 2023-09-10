@@ -95,8 +95,11 @@ hlsl::DxilModule *hlsl::DxilModule::TryGetDxilModule(llvm::Module *pModule) {
 
   hlsl::DxilModule *pDxilModule = nullptr;
   // TODO: add detail error in DxilMDHelper.
+#ifndef NO_EXCEPTION
   try {
+#endif
     pDxilModule = &pModule->GetOrCreateDxilModule();
+#ifndef NO_EXCEPTION
   } catch (const ::hlsl::Exception &hlslException) {
     diagStream << "load dxil metadata failed -";
     try {
@@ -112,6 +115,7 @@ hlsl::DxilModule *hlsl::DxilModule::TryGetDxilModule(llvm::Module *pModule) {
   } catch (...) {
     Ctx.diagnose(DxilErrorDiagnosticInfo("load dxil metadata failed - unknown error.\n"));
   }
+#endif
   return pDxilModule;
 }
 

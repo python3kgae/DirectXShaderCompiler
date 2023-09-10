@@ -19,7 +19,11 @@
 void CheckLLVMErrorCode(const std::error_code &ec) {
   if (ec) {
     DXASSERT(ec.category() == std::system_category(), "unexpected LLVM exception code");
+#ifndef NO_EXCEPTION
     throw hlsl::Exception(HRESULT_FROM_WIN32(ec.value()));
+#else
+    assert(0 && ec.value());
+#endif
   }
 }
 

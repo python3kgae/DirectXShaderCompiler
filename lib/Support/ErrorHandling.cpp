@@ -141,7 +141,12 @@ void llvm::llvm_unreachable_internal(const char *msg, const char *file,
 }
 
 void llvm::llvm_cast_assert_internal(const char *func) {
+#ifdef NO_EXCEPTION
+  std::string msg = std::string(func) + "<X>() argument of incompatible type!\n";
+  llvm_unreachable_internal(msg.c_str());
+#else
   throw hlsl::Exception(DXC_E_LLVM_CAST_ERROR, std::string(func) + "<X>() argument of incompatible type!\n");
+#endif
 }
 
 static void bindingsErrorHandler(void *user_data, const std::string& reason,

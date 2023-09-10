@@ -516,8 +516,9 @@ public:
     bool bPreprocessStarted = false;
     DxilShaderHash ShaderHashContent;
     DxcThreadMalloc TM(m_pMalloc);
-
+#ifndef NO_EXCEPTION
     try {
+#endif
       DefaultFPEnvScope fpEnvScope;
 
       IFT(CreateMemoryStream(m_pMalloc, &pOutputStream));
@@ -537,7 +538,17 @@ public:
         if (finished) {
           IFT(pDxcOperationResult->QueryInterface(riid, ppResult));
           hr = S_OK;
-          goto Cleanup;
+          // Workaround for error: cannot jump from this goto statement to its label.
+          // jump bypasses variable initialization
+          {
+            if (bPreprocessStarted) {
+              DxcEtw_DXCompilerPreprocess_Stop(hr);
+            }
+            if (bCompileStarted) {
+              DxcEtw_DXCompilerCompile_Stop(hr);
+            }
+            return hr;
+          }
         }
         if (pOptionErrorStream->GetPtrSize() > 0) {
           w << StringRef((const char*)pOptionErrorStream->GetPtr(), (size_t)pOptionErrorStream->GetPtrSize());
@@ -604,8 +615,23 @@ public:
 #endif // ENABLE_SPIRV_CODEGEN
 
       // Convert source code encoding
-      IFC(hlsl::DxcGetBlobAsUtf8(pSourceEncoding, m_pMalloc, &utf8Source,
-                                 opts.DefaultTextCodePage));
+      //IFC(hlsl::DxcGetBlobAsUtf8(pSourceEncoding, m_pMalloc, &utf8Source,
+      //                           opts.DefaultTextCodePage));
+      hr = hlsl::DxcGetBlobAsUtf8(pSourceEncoding, m_pMalloc, &utf8Source,
+                                 opts.DefaultTextCodePage);
+      if (DXC_FAILED(hr)) {
+          // Workaround for error: cannot jump from this goto statement to its label.
+          // jump bypasses variable initialization
+          {
+            if (bPreprocessStarted) {
+              DxcEtw_DXCompilerPreprocess_Stop(hr);
+            }
+            if (bCompileStarted) {
+              DxcEtw_DXCompilerCompile_Stop(hr);
+            }
+            return hr;
+          } 
+      }
 
       CComPtr<IDxcBlob> pOutputBlob;
       dxcutil::DxcArgsFileSystem *msfPtr = dxcutil::CreateDxcArgsFileSystem(
@@ -1145,6 +1171,7 @@ public:
       IFT(pResult->QueryInterface(riid, ppResult));
 
       hr = S_OK;
+#ifndef NO_EXCEPTION
     } catch (std::bad_alloc &) {
       hr = E_OUTOFMEMORY;
     } catch (hlsl::Exception &e) {
@@ -1163,6 +1190,7 @@ public:
     } catch (...) {
       hr = E_FAIL;
     }
+#endif
   Cleanup:
     if (bPreprocessStarted) {
       DxcEtw_DXCompilerPreprocess_Stop(hr);
@@ -1190,7 +1218,9 @@ public:
     HRESULT hr = S_OK;
     DxcEtw_DXCompilerDisassemble_Start();
     DxcThreadMalloc TM(m_pMalloc);
+#ifndef NO_EXCEPTION
     try {
+#endif
       DefaultFPEnvScope fpEnvScope;
 
       ::llvm::sys::fs::MSFileSystem *msfPtr;
@@ -1214,6 +1244,7 @@ public:
       IFT(pResult->QueryInterface(riid, ppResult));
 
       return S_OK;
+#ifndef NO_EXCEPTION
     } catch (std::bad_alloc &) {
       hr = E_OUTOFMEMORY;
     } catch (hlsl::Exception &e) {
@@ -1229,6 +1260,7 @@ public:
     } catch (...) {
       hr = E_FAIL;
     }
+#endif
   Cleanup:
     DxcEtw_DXCompilerDisassemble_Stop(hr);
     return hr;
@@ -1634,8 +1666,9 @@ HRESULT DxcCompilerAdapter::WrapCompile(
 ) {
   HRESULT hr = S_OK;
   DxcThreadMalloc TM(m_pMalloc);
-
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<IDxcUtils> pUtils;
     IFT(CreateDxcUtils(IID_PPV_ARGS(&pUtils)));
     CComPtr<IDxcCompilerArgs> pArgs;
@@ -1770,6 +1803,8 @@ HRESULT DxcCompilerAdapter::WrapCompile(
 
     IFR(pResult.QueryInterface(ppResult));
     hr = S_OK;
+
+#ifndef NO_EXCEPTION
   } catch (std::bad_alloc &) {
     hr = E_OUTOFMEMORY;
   } catch (hlsl::Exception &e) {
@@ -1780,6 +1815,7 @@ HRESULT DxcCompilerAdapter::WrapCompile(
   } catch (...) {
     hr = E_FAIL;
   }
+#endif
   return hr;
 }
 //////////////////////////////////////////////////////////////
@@ -1787,10 +1823,14 @@ HRESULT DxcCompilerAdapter::WrapCompile(
 
 HRESULT CreateDxcCompiler(_In_ REFIID riid, _Out_ LPVOID* ppv) {
   *ppv = nullptr;
+#ifndef NO_EXCEPTION
   try {
+#endif
     CComPtr<DxcCompiler> result(DxcCompiler::Alloc(DxcGetThreadMallocNoRef()));
     IFROOM(result.p);
     return result.p->QueryInterface(riid, ppv);
+#ifndef NO_EXCEPTION
   }
   CATCH_CPP_RETURN_HRESULT();
+#endif
 }
