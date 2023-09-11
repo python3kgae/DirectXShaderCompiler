@@ -436,6 +436,8 @@ public:
       throw;
     }
     // HLSL Change End
+#else
+    this->addNodeToList(New);  // Notify traits that we added a node...
 #endif
     return New;
   }
